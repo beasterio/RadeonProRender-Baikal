@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "WrapObject/CameraObject.h"
 #include "SceneGraph/camera.h"
 #include "radeon_rays.h"
+#include "math/mathutils.h"
 
 using namespace Baikal;
 using namespace RadeonRays;
@@ -68,6 +69,28 @@ void CameraObject::SetTransform(const RadeonRays::matrix& m)
 	at = m * at;
 	up = m * up;
 	m_cam->LookAt(eye, at, up);
+}
+
+void CameraObject::GetTransform(RadeonRays::matrix* m) const
+{
+    RadeonRays::float3 default_eye(0.f, 0.f, 0.f);
+    RadeonRays::float3 default_at(0.f, 0.f, -1.f);
+    RadeonRays::float3 default_up(0.f, 1.f, 0.f);
+    RadeonRays::float3 default_dir = default_at - default_eye;
+
+    RadeonRays::float3 eye, at, up, dir;
+    eye = m_cam->GetPosition();
+    at = m_cam->GetForwardVector() + eye;
+    up = m_cam->GetUpVector();
+    dir = at - eye;
+
+    RadeonRays::float3 axis = cross(dir, default_dir);
+    float angle = acos(dot(dir, default_dir)/ sqrtf(dir.sqnorm() * default_dir.sqnorm()));
+    
+    RadeonRays::matrix trans = translation(eye - default_eye);
+    RadeonRays::matrix rot = rotation(axis, angle);
+
+    *m = rot*trans;
 }
 
 void CameraObject::GetLookAt(RadeonRays::float3& eye,

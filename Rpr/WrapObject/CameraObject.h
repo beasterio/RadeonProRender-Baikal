@@ -61,6 +61,7 @@ public:
     rpr_float GetAperture() { return m_cam->GetAperture() * 1000.f; }
 
     void SetTransform(const RadeonRays::matrix& m);
+    void GetTransform(RadeonRays::matrix* out) const;
 
     Baikal::Camera* GetCamera() { return m_cam; }
 private:

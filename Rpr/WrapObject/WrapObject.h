@@ -27,7 +27,8 @@ THE SOFTWARE.
 class WrapObject
 {
 public:
-    WrapObject() = default;
+    WrapObject() : m_name("") {};
+       
     virtual ~WrapObject() = default;
 
     template <typename T>

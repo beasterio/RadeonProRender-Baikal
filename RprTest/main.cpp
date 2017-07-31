@@ -2,6 +2,7 @@
 #include "../RadeonRays/RadeonRays/include/math/matrix.h"
 #include "../RadeonRays/RadeonRays/include/math/mathutils.h"
 #include "../RprLoadStore/RprLoadStore.h"
+#include "../RprTest/RprTools.h"
 
 #include <map>
 #include <cassert>
@@ -117,6 +118,32 @@ namespace
 
 #define FR_MACRO_SAFE_FRDELETE(a)    { status = rprObjectDelete(a); a = NULL;   assert(status == RPR_SUCCESS); }
 
+
+void DeviceCompatibleCheck()
+{
+    RPR_TOOLS_DEVICE dev_idx[] = { RPRTD_GPU0,
+                                RPRTD_GPU1,
+                                RPRTD_GPU2,
+                                RPRTD_GPU3,
+                                RPRTD_GPU4,
+                                RPRTD_GPU5,
+                                RPRTD_GPU6,
+                                RPRTD_GPU7,
+                                RPRTD_CPU, };
+    
+    std::string str[] = {   "RPRTC_COMPATIBLE",
+                            "RPRTC_INCOMPATIBLE_UNKNOWN",
+                            "RPRTC_INCOMPATIBLE_UNCERTIFIED",
+                            "RPRTC_INCOMPATIBLE_CONTEXT_UNSUPPORTED",
+                            "RPRTC_INCOMPATIBLE_CONTEXT_ERROR", };
+    std::cout << "Test compatibility:" << std::endl;
+
+    for (auto ids : dev_idx)
+    {
+        RPR_TOOLS_COMPATIBILITY res = rprIsDeviceCompatible("some.dll", ids, nullptr, true, RPRTOS_WINDOWS);
+        std::cout << "\tdevice " << ids << " is "  << str[res] << std::endl;
+    }
+}
 
 void MeshCreationTest()
 {
@@ -3080,6 +3107,7 @@ void UpdateMaterial()
 }
 int main(int argc, char* argv[])
 {
+    DeviceCompatibleCheck();
 	MeshCreationTest();
     SimpleRenderTest();
     ComplexRenderTest();

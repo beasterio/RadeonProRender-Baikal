@@ -166,14 +166,18 @@ void ContextObject::SetAOV(rpr_int in_aov, FramebufferObject* buffer)
         throw Exception(RPR_ERROR_UNIMPLEMENTED, "Context: requested AOV not implemented.");
     }
     
+    auto new_out = buffer ? buffer->GetOutput() : nullptr;
     for (auto& c : m_cfgs)
     {
-        c.renderer->SetOutput(aov->second, buffer->GetOutput());
+        c.renderer->SetOutput(aov->second, new_out);
     }
 
     //update registered output framebuffer
     m_output_framebuffers.erase(old_buf);
-    m_output_framebuffers.insert(buffer);
+    if (buffer)
+    {
+        m_output_framebuffers.insert(buffer);
+    }
 }
 
 

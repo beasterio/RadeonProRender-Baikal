@@ -18,6 +18,7 @@ project "Rpr"
 
     if os.is("windows") then
         includedirs { "../3rdparty/glew/include", "../3rdparty/oiio/include"  }
+        linkoptions { '/DEF:"RadeonProRender.def"' }
 
         links {"RadeonRays",}
         links {"glew", "OpenGL32"}

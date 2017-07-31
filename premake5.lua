@@ -71,6 +71,9 @@ if _OPTIONS["rpr"] then
 	if fileExists("./RprLoadStore/RprLoadStore.lua") then
 		dofile("./RprLoadStore/RprLoadStore.lua")
 	end
+    if fileExists("./RprSupport/RprSupport.lua") then
+        dofile("./RprSupport/RprSupport.lua")
+    end
 end
 
 if fileExists("./Baikal/Baikal.lua") then
