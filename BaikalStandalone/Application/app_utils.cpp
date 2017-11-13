@@ -93,6 +93,9 @@ namespace Baikal
         char* camera_focal_length = GetCmdOption(argv, argv + argc, "-fl");
         s.camera_focal_length = camera_focal_length ? (float)atof(camera_focal_length) : s.camera_focal_length;
 
+        char* out_folder = GetCmdOption(argv, argv + argc, "-cam_out");
+        s.camera_out_folder = out_folder ? out_folder : s.camera_out_folder;
+
         char* interop = GetCmdOption(argv, argv + argc, "-interop");
         s.interop = interop ? (atoi(interop) > 0) : s.interop;
 

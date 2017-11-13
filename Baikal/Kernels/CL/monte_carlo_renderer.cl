@@ -641,6 +641,8 @@ KERNEL void FillAOVs(
     GLOBAL Light const* restrict lights,
     // Number of emissive objects
     int num_lights,
+    //camera
+    GLOBAL Camera const* camera, 
     // RNG seed
     uint rngseed,
     // Sampler states
@@ -657,6 +659,10 @@ KERNEL void FillAOVs(
     int world_shading_normal_enabled,
     // World normal AOV
     GLOBAL float4* restrict aov_world_shading_normal,
+    // View normal flag
+    int view_shading_normal_enabled,
+    // View normal AOV
+    GLOBAL float4* restrict aov_view_shading_normal,
     // World true normal flag
     int world_geometric_normal_enabled,
     // World true normal AOV
@@ -769,6 +775,38 @@ KERNEL void FillAOVs(
 
                 aov_world_shading_normal[idx].xyz += diffgeo.n;
                 aov_world_shading_normal[idx].w += 1.f;
+            }
+
+            if (view_shading_normal_enabled)
+            {
+                float ngdotwi = dot(diffgeo.ng, wi);
+                bool backfacing = ngdotwi < 0.f;
+
+                // Select BxDF
+                Material_Select(&scene, wi, &sampler, TEXTURE_ARGS, SAMPLER_ARGS, &diffgeo);
+
+                float s = Bxdf_IsBtdf(&diffgeo) ? (-sign(ngdotwi)) : 1.f;
+                if (backfacing && !Bxdf_IsBtdf(&diffgeo))
+                {
+                    //Reverse normal and tangents in this case
+                    //but not for BTDFs, since BTDFs rely
+                    //on normal direction in order to arrange   
+                    //indices of refraction
+                    diffgeo.n = -diffgeo.n;
+                    diffgeo.dpdu = -diffgeo.dpdu;
+                    diffgeo.dpdv = -diffgeo.dpdv;
+                }
+
+                DifferentialGeometry_ApplyBumpNormalMap(&diffgeo, TEXTURE_ARGS);
+                DifferentialGeometry_CalculateTangentTransforms(&diffgeo);
+
+                float3 res = make_float3(dot(camera->right, diffgeo.n), 
+                                        dot(camera->up, diffgeo.n), 
+                                        dot(camera->forward, diffgeo.n));
+                res = normalize(res);
+
+                aov_view_shading_normal[idx].xyz += res;
+                aov_view_shading_normal[idx].w += 1.f;
             }
 
             if (world_geometric_normal_enabled)

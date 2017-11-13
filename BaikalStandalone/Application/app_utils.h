@@ -64,6 +64,9 @@ namespace Baikal
         float camera_focus_distance;
         float camera_focal_length;
 
+        //folder to store camera position output
+        std::string camera_out_folder;
+
         //app
         bool progressive;
         bool cmd_line_mode;

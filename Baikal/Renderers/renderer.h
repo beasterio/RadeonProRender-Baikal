@@ -54,6 +54,7 @@ namespace Baikal
             kColor,
             kWorldPosition,
             kWorldShadingNormal,
+            kViewShadingNormal,
             kWorldGeometricNormal,
             kUv,
             kWireframe,

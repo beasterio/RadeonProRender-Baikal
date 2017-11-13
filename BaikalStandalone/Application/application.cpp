@@ -78,8 +78,10 @@ namespace Baikal
     static bool     g_is_home_pressed = false;
     static bool     g_is_end_pressed = false;
     static bool     g_is_mouse_tracking = false;
+    static bool     g_is_c_pressed = false;
     static float2   g_mouse_pos = float2(0, 0);
     static float2   g_mouse_delta = float2(0, 0);
+    const std::string kCameraLogFile("camera.log");
 
     void Application::OnMouseMove(GLFWwindow* window, double x, double y)
     {
@@ -139,6 +141,9 @@ namespace Baikal
             break;
         case GLFW_KEY_F3:
             app->m_settings.benchmark = action == GLFW_PRESS ? true : app->m_settings.benchmark;
+            break;
+        case GLFW_KEY_C:
+            g_is_c_pressed = action == GLFW_RELEASE ? true : false;
             break;
         default:
             break;
@@ -215,6 +220,32 @@ namespace Baikal
             {
                 camera->MoveUp(-(float)dt.count() * kMovementSpeed);
                 update = true;
+            }
+
+            //log camera props
+            if (g_is_c_pressed)
+            {
+                std::ofstream fs;
+                //use app cmd option instead
+                fs.open(m_settings.camera_out_folder + "/" + kCameraLogFile, std::ios::app);
+                RadeonRays::float3 cam_pos = camera->GetPosition();
+                RadeonRays::float3 cam_at = cam_pos + camera->GetForwardVector();
+                float aperture = camera->GetAperture();
+                float focus_dist = camera->GetFocusDistance();
+                float focal_length = camera->GetFocalLength();
+                    //camera position
+                fs << " -cpx " << cam_pos.x
+                    << " -cpy " << cam_pos.y
+                    << " -cpz " << cam_pos.z
+                    //camera look at
+                    << " -tpx " << cam_at.x
+                    << " -tpy " << cam_at.y
+                    << " -tpz " << cam_at.z
+                    << " -a " << aperture
+                    << " -fd " << focus_dist
+                    << " -fl " << focal_length << std::endl;
+
+                g_is_c_pressed = false;
             }
         }
 
@@ -429,7 +460,8 @@ namespace Baikal
         static char const* outputs =
             "Color\0"
             "World position\0"
-            "Shading normal\0"
+            "World shading normal\0"
+            "View shading normal\0"
             "Geometric normal\0"
             "Texture coords\0"
             "Wire\0"
@@ -449,6 +481,7 @@ namespace Baikal
             ImGui::Text("Use arrow keys to move");
             ImGui::Text("PgUp/Down to climb/descent");
             ImGui::Text("Mouse+RMB to look around");
+            ImGui::Text("C to log camera parameters");
             ImGui::Text("F1 to hide/show GUI");
             ImGui::Separator();
             ImGui::Text("Device vendor: %s", m_cl->GetDevice(0).GetVendor().c_str());
