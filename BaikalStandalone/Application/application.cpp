@@ -83,6 +83,7 @@ namespace Baikal
     static float2   g_mouse_delta = float2(0, 0);
     const std::string kCameraLogFile("camera.log");
 
+
     void Application::OnMouseMove(GLFWwindow* window, double x, double y)
     {
         if (g_is_mouse_tracking)
@@ -259,6 +260,52 @@ namespace Baikal
             m_cl->UpdateScene();
         }
 
+        if (m_settings.save_aov)
+        {
+            auto type = m_cl->GetOutputType();
+            if (!m_aov_samples.empty())
+            {
+                auto it = m_aov_samples.find(m_settings.samplecount);
+                if (it != m_aov_samples.end())
+                {
+                    std::string out_name = m_settings.aov_out_folder + "/" + "aov_color_f" + std::to_string(*it) + ".exr";
+                    m_cl->SaveFrameBuffer(m_settings, out_name, 16);
+                    m_aov_samples.erase(it);
+                }
+            }
+            //save other AOVs
+            else
+            {
+                struct OutputDesc
+                {
+                    //type of AOV
+                    Renderer::OutputType type;
+                    //string name of the type
+                    std::string type_str;
+                    //image extension(ex. "exr", "jpg")
+                    std::string ext;
+                    //desired bits per pixel of stored image
+                    int bpp;
+                };
+                std::vector<OutputDesc> output_desc_map = { {Renderer::OutputType::kViewShadingNormal, "view_shading_normal", "jpg", 8},
+                                                            { Renderer::OutputType::kDepth, "view_shading_depth", "exr", 16 },
+                                                            { Renderer::OutputType::kAlbedo, "albedo", "jpg", 8 },
+                                                            { Renderer::OutputType::kGloss, "gloss", "jpg", 8 } };
+
+                for (auto it = output_desc_map.begin(); it != output_desc_map.end(); ++it)
+                {
+                    std::string out_name = m_settings.aov_out_folder + "/" + "aov_" + it->type_str + "." + it->ext;
+
+                    m_cl->SetOutputType(it->type);
+                    m_cl->UpdateScene();
+
+                    m_cl->Render(-1);
+                    m_cl->SaveFrameBuffer(m_settings, out_name, it->bpp);
+                }
+                exit(0);
+            }
+        }
+
         if (m_settings.num_samples == -1 || m_settings.samplecount <  m_settings.num_samples)
         {
             m_cl->Render(m_settings.samplecount);
@@ -315,6 +362,7 @@ namespace Baikal
         : m_window(nullptr)
         , m_num_triangles(0)
         , m_num_instances(0)
+        , m_aov_samples{1, 2, 4, 8, 2048}
     {
         // Command line parsing
         AppCliParser cli;

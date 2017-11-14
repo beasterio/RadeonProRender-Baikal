@@ -378,6 +378,18 @@ namespace Baikal
 
     void AppClRender::SaveFrameBuffer(AppSettings& settings)
     {
+        std::stringstream oss;
+        auto camera_position = m_camera->GetPosition();
+        auto camera_direction = m_camera->GetForwardVector();
+        oss << "../Output/" << settings.modelname << "_p" << camera_position.x << camera_position.y << camera_position.z <<
+            "_d" << camera_direction.x << camera_direction.y << camera_direction.z <<
+            "_s" << settings.num_samples << ".exr";
+
+        SaveFrameBuffer(settings, oss.str(), 16);
+    }
+
+    void AppClRender::SaveFrameBuffer(AppSettings& settings, const std::string& filename, int bpp = 32)
+    {
         std::vector<RadeonRays::float3> data;
 
         //read cl output in case of iterop
@@ -394,26 +406,38 @@ namespace Baikal
         auto& fdata = settings.interop ? output_data : m_outputs[m_primary].fdata;
 
         data.resize(fdata.size());
-        std::transform(fdata.cbegin(), fdata.cend(), data.begin(),
-            [](RadeonRays::float3 const& v)
-        {
-            float invw = 1.f / v.w;
-            return v * invw;
-        });
+        memcpy(data.data(), fdata.data(), sizeof(RadeonRays::float3) * fdata.size());
+        //std::transform(fdata.cbegin(), fdata.cend(), data.begin(),
+        //    [](RadeonRays::float3 const& v)
+        //{
+        //    float invw = 1.f / v.w;
+        //    return v * invw;
+        //});
+        SaveImage(filename, settings.width, settings.height, bpp, data.data());
 
-        std::stringstream oss;
-        auto camera_position = m_camera->GetPosition();
-        auto camera_direction = m_camera->GetForwardVector();
-        oss << "../Output/" << settings.modelname << "_p" << camera_position.x << camera_position.y << camera_position.z <<
-            "_d" << camera_direction.x << camera_direction.y << camera_direction.z <<
-            "_s" << settings.num_samples << ".exr";
-
-        SaveImage(oss.str(), settings.width, settings.height, data.data());
     }
 
-    void AppClRender::SaveImage(const std::string& name, int width, int height, const RadeonRays::float3* data)
+
+    void AppClRender::SaveImage(const std::string& name, int width, int height, int bpp, const RadeonRays::float3* data)
     {
         OIIO_NAMESPACE_USING;
+
+        TypeDesc fmt;
+        switch (bpp)
+        {
+        case 8:
+            fmt = TypeDesc::UINT8;
+            break;
+        case 16:
+            fmt = TypeDesc::UINT16;
+            break;
+        case 32:
+            fmt = TypeDesc::FLOAT;
+            break;
+        default:
+            throw std::runtime_error("Unhandled bpp of image.");
+        }
+
 
         std::vector<float3> tempbuf(width * height);
         tempbuf.assign(data, data + width * height);
@@ -437,7 +461,7 @@ namespace Baikal
             throw std::runtime_error("Can't create image file on disk");
         }
 
-        ImageSpec spec(width, height, 3, TypeDesc::FLOAT);
+        ImageSpec spec(width, height, 3, fmt);
 
         out->open(name, spec);
         out->write_image(TypeDesc::FLOAT, &tempbuf[0], sizeof(float3));
@@ -546,7 +570,7 @@ namespace Baikal
         std::stringstream oss;
         oss << "../Output/" << settings.modelname << ".exr";
 
-        SaveImage(oss.str(), settings.width, settings.height, &data[0]);
+        SaveImage(oss.str(), settings.width, settings.height, 32, &data[0]);
 
         std::cout << "Running RT benchmark...\n";
 

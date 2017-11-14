@@ -93,8 +93,11 @@ namespace Baikal
         char* camera_focal_length = GetCmdOption(argv, argv + argc, "-fl");
         s.camera_focal_length = camera_focal_length ? (float)atof(camera_focal_length) : s.camera_focal_length;
 
-        char* out_folder = GetCmdOption(argv, argv + argc, "-cam_out");
+        char* out_folder = GetCmdOption(argv, argv + argc, "-output_cam");
         s.camera_out_folder = out_folder ? out_folder : s.camera_out_folder;
+
+        char* out_aov_folder = GetCmdOption(argv, argv + argc, "-output_aov");
+        s.aov_out_folder = out_aov_folder ? out_aov_folder : s.aov_out_folder;
 
         char* interop = GetCmdOption(argv, argv + argc, "-interop");
         s.interop = interop ? (atoi(interop) > 0) : s.interop;
@@ -133,6 +136,11 @@ namespace Baikal
         if (CmdOptionExists(argv, argv + argc, "-nowindow"))
         {
             s.cmd_line_mode = true;
+        }
+
+        if (CmdOptionExists(argv, argv + argc, "-save_aov"))
+        {
+            s.save_aov = true;
         }
 
         return s;
@@ -185,6 +193,11 @@ namespace Baikal
         , camera_aperture(0.f)
         , camera_focus_distance(1.f)
         , camera_focal_length(0.035f) // 35mm lens
+
+        //output
+        , camera_out_folder(".")
+        , aov_out_folder(".")
+        , save_aov(false)
 
         //app
         , progressive(false)

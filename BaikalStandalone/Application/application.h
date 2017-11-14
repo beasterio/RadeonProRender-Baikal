@@ -59,5 +59,8 @@ namespace Baikal
         //scene stats stuff
         int m_num_triangles;
         int m_num_instances;
+
+        //frames to save AOVs
+        std::set<int> m_aov_samples;
     };
 }

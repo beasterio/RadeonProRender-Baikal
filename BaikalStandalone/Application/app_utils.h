@@ -66,6 +66,10 @@ namespace Baikal
 
         //folder to store camera position output
         std::string camera_out_folder;
+        //folder to store AOV framebuffers
+        std::string aov_out_folder;
+        bool save_aov;
+        
 
         //app
         bool progressive;

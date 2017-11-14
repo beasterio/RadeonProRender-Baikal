@@ -84,7 +84,8 @@ namespace Baikal
 
         //save cl frame buffer to file
         void SaveFrameBuffer(AppSettings& settings);
-        void SaveImage(const std::string& name, int width, int height, const RadeonRays::float3* data);
+        void SaveFrameBuffer(AppSettings& settings, const std::string& filename, int bpp);
+        void SaveImage(const std::string& name, int width, int height, int bpp, const RadeonRays::float3* data);
 
         Baikal::PerspectiveCamera::Ptr GetCamera() { return m_camera; };
         Baikal::Scene1::Ptr GetScene() { return m_scene; };
