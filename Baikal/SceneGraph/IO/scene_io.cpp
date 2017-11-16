@@ -276,26 +276,6 @@ namespace Baikal
             }
         }
 
-        // TODO: temporary code, add IBL
-        auto ibl_texture = image_io->LoadImage("../Resources/Textures/studio015.hdr");
-
-        auto ibl = ImageBasedLight::Create();
-        ibl->SetTexture(ibl_texture);
-        ibl->SetMultiplier(1.f);
-
-        // TODO: temporary code to add directional light
-        auto light = DirectionalLight::Create();
-        light->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
-        light->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
-
-        auto light1 = DirectionalLight::Create();
-        light1->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
-        light1->SetEmittedRadiance(RadeonRays::float3(1.f, 0.8f, 0.65f));
-
-        //scene->AttachLight(light);
-        //scene->AttachLight(light1);
-        scene->AttachLight(ibl);
-
         return scene;
     }
 }

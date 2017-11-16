@@ -79,9 +79,12 @@ namespace Baikal
     static bool     g_is_end_pressed = false;
     static bool     g_is_mouse_tracking = false;
     static bool     g_is_c_pressed = false;
+    static bool     g_is_l_pressed = false;
     static float2   g_mouse_pos = float2(0, 0);
     static float2   g_mouse_delta = float2(0, 0);
     const std::string kCameraLogFile("camera.log");
+    //ls - light set
+    const std::string kLightLogFile("light.ls");
 
 
     void Application::OnMouseMove(GLFWwindow* window, double x, double y)
@@ -145,6 +148,9 @@ namespace Baikal
             break;
         case GLFW_KEY_C:
             g_is_c_pressed = action == GLFW_RELEASE ? true : false;
+            break;
+        case GLFW_KEY_L:
+            g_is_l_pressed = action == GLFW_RELEASE ? true : false;
             break;
         default:
             break;
@@ -227,7 +233,6 @@ namespace Baikal
             if (g_is_c_pressed)
             {
                 std::ofstream fs;
-                //use app cmd option instead
                 fs.open(m_settings.camera_out_folder + "/" + kCameraLogFile, std::ios::app);
                 RadeonRays::float3 cam_pos = camera->GetPosition();
                 RadeonRays::float3 cam_at = cam_pos + camera->GetForwardVector();
@@ -247,6 +252,61 @@ namespace Baikal
                     << " -fl " << focal_length << std::endl;
 
                 g_is_c_pressed = false;
+            }
+            //log scene lights
+            if (g_is_l_pressed)
+            {
+                std::ofstream fs;
+                fs.open(kLightLogFile, std::ios::trunc);
+                auto scene = m_cl->GetScene();
+                auto it = scene->CreateLightIterator();
+                for (; it->IsValid(); it->Next())
+                {
+                    Light::Ptr l = it->ItemAs<Light>();
+
+                    //get light type
+                    ImageBasedLight* ibl = dynamic_cast<ImageBasedLight*>(l.get());
+                    PointLight* pointl = dynamic_cast<PointLight*>(l.get());
+                    DirectionalLight* directl = dynamic_cast<DirectionalLight*>(l.get());
+                    SpotLight* spotl = dynamic_cast<SpotLight*>(l.get());
+                    AreaLight* areal = dynamic_cast<AreaLight*>(l.get());
+
+                    if (areal)
+                    {
+                        //area lights are created when materials load, so ignore it;
+                        continue;
+                    }
+                    
+                    if (ibl)
+                    {
+                        fs << "newlight ibl" << std::endl;
+                        fs << "tex " << m_settings.envmapname << std::endl;
+                        fs << "mul " << std::to_string(ibl->GetMultiplier()) << std::endl;
+                    }
+                    else if (spotl)
+                    {
+                        fs << "newlight spot" << std::endl;
+                        fs << "cs " << spotl->GetConeShape().x << " " << spotl->GetConeShape().y << std::endl;
+                    }
+                    else if (pointl)
+                    {
+                        fs << "newlight point" << std::endl;
+                    }
+                    else if (directl)
+                    {
+                        fs << "newlight direct" << std::endl;
+                    }
+
+                    float3 p = l->GetPosition();
+                    float3 d = l->GetDirection();
+                    float3 r = l->GetEmittedRadiance();
+                    fs << "p " << p.x << " " << p.y << " " << p.z << std::endl;
+                    fs << "d " << d.x << " " << d.y << " " << d.z << std::endl;
+                    fs << "r " << r.x << " " << r.y << " " << r.z << std::endl;
+                    fs << std::endl;
+                }
+
+                g_is_l_pressed = false;
             }
         }
 

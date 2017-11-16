@@ -28,6 +28,8 @@ THE SOFTWARE.
 #include "SceneGraph/camera.h"
 #include "SceneGraph/material.h"
 #include "SceneGraph/IO/scene_io.h"
+#include "SceneGraph/IO/image_io.h"
+
 #include "SceneGraph/IO/material_io.h"
 #include "SceneGraph/material.h"
 
@@ -215,7 +217,141 @@ namespace Baikal
         std::cout << "Lens focus distance: " << m_camera->GetFocusDistance() << "m\n";
         std::cout << "F-Stop: " << 1.f / (m_camera->GetAperture() * 10.f) << "\n";
         std::cout << "Sensor size: " << settings.camera_sensor_size.x * 1000.f << "x" << settings.camera_sensor_size.y * 1000.f << "mm\n";
+
+        //load lights set
+        LoadLightSet(settings);
+
+        if (m_scene->GetNumLights() == 0)
+        {
+            // TODO: temporary code, add IBL
+            auto image_io(ImageIo::CreateImageIo());
+            auto ibl_texture = image_io->LoadImage("../Resources/Textures/studio015.hdr");
+            auto ibl = ImageBasedLight::Create();
+            ibl->SetTexture(ibl_texture);
+            ibl->SetMultiplier(1.f);
+
+            // TODO: temporary code to add some lights
+            auto point = PointLight::Create();
+            point->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
+            point->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
+
+            auto dir = DirectionalLight::Create();
+            dir->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
+            dir->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
+
+            auto spot = SpotLight::Create();
+            spot->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
+            spot->SetEmittedRadiance(RadeonRays::float3(1.f, 0.8f, 0.65f));
+            spot->SetConeShape({ 0.2f, 1.5f });
+
+            //m_scene->AttachLight(point);
+            //m_scene->AttachLight(dir);
+            //m_scene->AttachLight(spot);
+            m_scene->AttachLight(ibl);
+        }
     }
+
+    void AppClRender::LoadLightSet(AppSettings& settings)
+    {
+        if (!settings.light_set.empty())
+        {
+            std::ifstream fs(settings.light_set);
+            if (!fs)
+            {
+                throw std::runtime_error("Failed to open lights set file." + settings.light_set);
+            }
+            std::string line;
+            Light::Ptr new_light;
+            while (std::getline(fs, line))
+            {
+                //lights are separated by empty lines
+                if (line.empty())
+                {
+                    continue;
+                }
+
+                std::istringstream iss(line);
+                std::string val_name;
+                iss >> val_name;
+
+                if (val_name == "newlight")
+                {
+                    std::string type;
+                    iss >> type;
+                    if (type == "point")
+                    {
+                        new_light = PointLight::Create();
+                    }
+                    else if (type == "direct")
+                    {
+                        new_light = DirectionalLight::Create();
+                    }
+                    else if (type == "spot")
+                    {
+                        new_light = SpotLight::Create();
+                    }
+                    else if (type == "ibl")
+                    {
+                        new_light = ImageBasedLight::Create();
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Invalid light type " + type);
+                    }
+                    m_scene->AttachLight(new_light);
+                }
+                else if (val_name == "p")
+                {
+                    float3 pos;
+                    iss >> pos.x >> pos.y >> pos.z;
+                    new_light->SetPosition(pos);
+                }
+                else if (val_name == "d")
+                {
+                    float3 dir;
+                    iss >> dir.x >> dir.y >> dir.z;
+                    new_light->SetDirection(dir);
+                }
+                else if (val_name == "r")
+                {
+                    float3 r;
+                    iss >> r.x >> r.y >> r.z;
+                    new_light->SetEmittedRadiance(r);
+                }
+                else if (val_name == "cs")
+                {
+                    float2 cs;
+                    iss >> cs.x >> cs.y;
+                    //this option available only for spot light
+                    SpotLight::Ptr spot = std::dynamic_pointer_cast<SpotLight>(new_light);
+                    spot->SetConeShape(cs);
+                }
+                else if (val_name == "tex")
+                {
+                    std::string tex_name;
+                    //texture name can contain spaces
+                    getline(iss, tex_name);
+                    //remove ' ' from string
+                    tex_name.erase(0, 1);
+                    //this option available only for ibl
+                    ImageBasedLight::Ptr ibl = std::dynamic_pointer_cast<ImageBasedLight>(new_light);
+                    auto image_io(ImageIo::CreateImageIo());
+                    Texture::Ptr tex = image_io->LoadImage(tex_name.c_str());
+                    ibl->SetTexture(tex);
+                }
+                else if (val_name == "mul")
+                {
+                    float mul;
+                    iss >> mul;
+                    //this option available only for ibl
+                    ImageBasedLight::Ptr ibl = std::dynamic_pointer_cast<ImageBasedLight>(new_light);
+                    ibl->SetMultiplier(mul);
+                }
+            }
+
+        }
+    }
+
 
     void AppClRender::UpdateScene()
     {

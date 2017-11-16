@@ -70,6 +70,9 @@ namespace Baikal
         std::string aov_out_folder;
         bool save_aov;
         
+        //file with scene lights description
+        std::string light_set;
+
 
         //app
         bool progressive;

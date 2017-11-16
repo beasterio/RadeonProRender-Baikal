@@ -99,6 +99,9 @@ namespace Baikal
         char* out_aov_folder = GetCmdOption(argv, argv + argc, "-output_aov");
         s.aov_out_folder = out_aov_folder ? out_aov_folder : s.aov_out_folder;
 
+        char* light_set = GetCmdOption(argv, argv + argc, "-light_set");
+        s.light_set = light_set ? light_set : s.light_set;
+
         char* interop = GetCmdOption(argv, argv + argc, "-interop");
         s.interop = interop ? (atoi(interop) > 0) : s.interop;
 
@@ -198,6 +201,7 @@ namespace Baikal
         , camera_out_folder(".")
         , aov_out_folder(".")
         , save_aov(false)
+        , light_set("")
 
         //app
         , progressive(false)
