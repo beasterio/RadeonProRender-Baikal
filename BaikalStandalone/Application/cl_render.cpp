@@ -38,9 +38,10 @@ THE SOFTWARE.
 
 #include <fstream>
 #include <sstream>
+#include <ostream>
 #include <thread>
 #include <chrono>
-
+#include <cmath>
 
 #include "PostEffects/wavelet_denoiser.h"
 #include "Utils/clw_class.h"
@@ -171,7 +172,7 @@ namespace Baikal
             auto scene_io1 = Baikal::SceneIo::CreateSceneIoTest();
             m_scene = scene_io->LoadScene(filename, basepath);
 
-            // Enable this to generate new materal mapping for a model
+            // Enable this to generate new material mapping for a model
 #if 0
             auto material_io{Baikal::MaterialIo::CreateMaterialIoXML()};
             material_io->SaveMaterialsFromScene(basepath + "materials.xml", *m_scene);
@@ -221,7 +222,7 @@ namespace Baikal
         //load lights set
         LoadLightSet(settings);
 
-        if (m_scene->GetNumLights() == 0)
+        if (settings.light_set.empty())
         {
             // TODO: temporary code, add IBL
             auto image_io(ImageIo::CreateImageIo());
@@ -230,22 +231,34 @@ namespace Baikal
             ibl->SetTexture(ibl_texture);
             ibl->SetMultiplier(1.f);
 
-            // TODO: temporary code to add some lights
-            auto point = PointLight::Create();
-            point->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
-            point->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
+            //// TODO: temporary code to add some lights
+            //auto point = PointLight::Create();
+            //point->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
+            //point->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
 
+
+
+            RadeonRays::float3 p(1064.39f, 1637.5f, 66.8923f);
+            RadeonRays::float3 d = RadeonRays::float3(1063.67f, 1636.81f, 66.8114f) - p;
             auto dir = DirectionalLight::Create();
-            dir->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
+            dir->SetPosition(p);
+            dir->SetDirection(RadeonRays::normalize(d));
             dir->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
 
-            auto spot = SpotLight::Create();
-            spot->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
-            spot->SetEmittedRadiance(RadeonRays::float3(1.f, 0.8f, 0.65f));
-            spot->SetConeShape({ 0.2f, 1.5f });
+            //p = RadeonRays::float3(-1198.76f, 179.81f, 386.791f);
+            //d = RadeonRays::float3(-1207.77f, 379.79f, 398.747f) - p;
+            //auto point = PointLight::Create();
+            //point->SetPosition(p);
+            //point->SetDirection(RadeonRays::normalize(RadeonRays::float3(d)));
+            //point->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.5f, 0.5f));
+
+            //auto spot = SpotLight::Create();
+            //spot->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
+            //spot->SetEmittedRadiance(RadeonRays::float3(1.f, 0.8f, 0.65f));
+            //spot->SetConeShape({ 0.2f, 1.5f });
 
             //m_scene->AttachLight(point);
-            //m_scene->AttachLight(dir);
+            m_scene->AttachLight(dir);
             //m_scene->AttachLight(spot);
             m_scene->AttachLight(ibl);
         }
@@ -581,8 +594,14 @@ namespace Baikal
         for (auto y = 0; y < height; ++y)
             for (auto x = 0; x < width; ++x)
             {
-
                 float3 val = data[(height - 1 - y) * width + x];
+                if (std::isnan(val.x) ||
+                    std::isnan(val.y) ||
+                    std::isnan(val.z) ||
+                    std::isnan(val.w))
+                {
+                    std::cerr << "Nan in " << name << std::endl;
+                }
                 tempbuf[y * width + x] = (1.f / val.w) * val;
 
                 tempbuf[y * width + x].x = std::pow(tempbuf[y * width + x].x, 1.f / 2.2f);
