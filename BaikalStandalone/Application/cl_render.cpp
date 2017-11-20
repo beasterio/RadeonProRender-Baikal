@@ -534,28 +534,26 @@ namespace Baikal
             "_d" << camera_direction.x << camera_direction.y << camera_direction.z <<
             "_s" << settings.num_samples << ".exr";
 
-        SaveFrameBuffer(settings, oss.str(), 16);
+        SaveFrameBuffer(GetOutputType(), settings, oss.str(), 16);
     }
 
-    void AppClRender::SaveFrameBuffer(AppSettings& settings, const std::string& filename, int bpp = 32)
+    void AppClRender::SaveFrameBuffer(Renderer::OutputType type, AppSettings& settings, const std::string& filename, int bpp = 32)
     {
         std::vector<RadeonRays::float3> data;
 
-        //read cl output in case of iterop
+        //read cl output in case of interop
         std::vector<RadeonRays::float3> output_data;
-        if (settings.interop)
         {
-            auto output = m_outputs[m_primary].output.get();
+            auto output = m_cfgs[m_primary].renderer->GetOutput(type);
+            assert(output);
             auto buffer = static_cast<Baikal::ClwOutput*>(output)->data();
             output_data.resize(buffer.GetElementCount());
             m_cfgs[m_primary].context.ReadBuffer(0, static_cast<Baikal::ClwOutput*>(output)->data(), &output_data[0], output_data.size()).Wait();
         }
 
-        //use already copied to CPU cl data in case of no interop
-        auto& fdata = settings.interop ? output_data : m_outputs[m_primary].fdata;
 
-        data.resize(fdata.size());
-        memcpy(data.data(), fdata.data(), sizeof(RadeonRays::float3) * fdata.size());
+        data.resize(output_data.size());
+        memcpy(data.data(), output_data.data(), sizeof(RadeonRays::float3) * output_data.size());
         //std::transform(fdata.cbegin(), fdata.cend(), data.begin(),
         //    [](RadeonRays::float3 const& v)
         //{
@@ -750,6 +748,38 @@ namespace Baikal
         }
         m_output_type = type;
     }
+
+    void AppClRender::EnableOutputType(Renderer::OutputType type)
+    {
+        assert(type != m_output_type);
+        for (int i = 0; i < m_cfgs.size(); ++i)
+        {
+            auto main_output = m_cfgs[i].renderer->GetOutput(m_output_type);
+            int w = main_output->width();
+            int h = main_output->height();
+            if (!m_cfgs[i].renderer->GetOutput(type))
+            {
+                auto aov = m_cfgs[i].factory->CreateOutput(w, h);
+                m_cfgs[i].renderer->SetOutput(type, aov.get());
+                m_outputs[i].aovs.push_back(std::move(aov));
+            }
+        }
+    }
+    void AppClRender::DisableOutputType(Renderer::OutputType type)
+    {
+        assert(type != m_output_type);
+        for (int i = 0; i < m_cfgs.size(); ++i)
+        {
+            auto aov = m_cfgs[i].renderer->GetOutput(type);
+            if (aov)
+            {
+                m_cfgs[i].renderer->SetOutput(type, nullptr);
+                auto it = std::find_if(m_outputs[i].aovs.begin(), m_outputs[i].aovs.end(), [aov](const std::unique_ptr<Baikal::Output>& ptr) {return ptr.get() == aov; });
+                m_outputs[i].aovs.erase(it);
+            }
+        }
+    }
+
 
 #ifdef ENABLE_DENOISER  
     void AppClRender::SetDenoiserFloatParam(const std::string& name, const float4& value)

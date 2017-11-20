@@ -323,18 +323,8 @@ namespace Baikal
         if (m_settings.save_aov)
         {
             auto type = m_cl->GetOutputType();
-            if (!m_aov_samples.empty())
-            {
-                auto it = m_aov_samples.find(m_settings.samplecount);
-                if (it != m_aov_samples.end())
-                {
-                    std::string out_name = m_settings.aov_out_folder + "/" + "aov_color_f" + std::to_string(*it) + ".exr";
-                    m_cl->SaveFrameBuffer(m_settings, out_name, 16);
-                    m_aov_samples.erase(it);
-                }
-            }
-            //save other AOVs
-            else
+            auto it = m_aov_samples.find(m_settings.samplecount);
+            if (it != m_aov_samples.end())
             {
                 struct OutputDesc
                 {
@@ -347,22 +337,27 @@ namespace Baikal
                     //desired bits per pixel of stored image
                     int bpp;
                 };
-                std::vector<OutputDesc> output_desc_map = { {Renderer::OutputType::kViewShadingNormal, "view_shading_normal", "jpg", 8},
-                                                            { Renderer::OutputType::kDepth, "view_shading_depth", "exr", 16 },
-                                                            { Renderer::OutputType::kAlbedo, "albedo", "jpg", 8 },
-                                                            { Renderer::OutputType::kGloss, "gloss", "jpg", 8 } };
-
-                for (auto it = output_desc_map.begin(); it != output_desc_map.end(); ++it)
+                std::vector<OutputDesc> output_desc_map = { { Renderer::OutputType::kColor, "color", "exr", 16 }, 
+                { Renderer::OutputType::kViewShadingNormal, "view_shading_normal", "jpg", 8 },
+                { Renderer::OutputType::kDepth, "view_shading_depth", "exr", 16 },
+                { Renderer::OutputType::kAlbedo, "albedo", "jpg", 8 },
+                { Renderer::OutputType::kGloss, "gloss", "jpg", 8 } };
+                
+                //save all aovs
+                for (auto it_aov = output_desc_map.begin(); it_aov != output_desc_map.end(); ++it_aov)
                 {
-                    std::string out_name = m_settings.aov_out_folder + "/" + "aov_" + it->type_str + "." + it->ext;
-
-                    m_cl->SetOutputType(it->type);
-                    m_cl->UpdateScene();
-
-                    m_cl->Render(-1);
-                    m_cl->SaveFrameBuffer(m_settings, out_name, it->bpp);
+                    std::string out_name = m_settings.aov_out_folder + "/" + "aov_" + it_aov->type_str + "_f" + std::to_string(m_settings.samplecount) + "." + it_aov->ext;
+                    m_cl->SaveFrameBuffer(it_aov->type, m_settings, out_name, it_aov->bpp);
                 }
+                m_aov_samples.erase(it);
+
+            }
+
+            //closing app if aovs samples max is reached  
+            if (m_aov_samples.empty())
+            {
                 exit(0);
+
             }
         }
 
@@ -422,11 +417,12 @@ namespace Baikal
         : m_window(nullptr)
         , m_num_triangles(0)
         , m_num_instances(0)
-        , m_aov_samples{1, 2, 4, 8, 2048}
+        , m_aov_samples{1, 2, 4, 8}
     {
         // Command line parsing
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
+        m_aov_samples.insert(m_settings.aov_samples);
         if (!m_settings.cmd_line_mode)
         {
             // Initialize GLFW
@@ -470,6 +466,16 @@ namespace Baikal
             {
                 m_gl.reset(new AppGlRender(m_settings));
                 m_cl.reset(new AppClRender(m_settings, m_gl->GetTexture()));
+
+                //enable additional aovs outputs
+                if (m_settings.save_aov)
+                {
+                    m_cl->EnableOutputType(Baikal::Renderer::OutputType::kAlbedo);
+                    m_cl->EnableOutputType(Baikal::Renderer::OutputType::kViewShadingNormal);
+                    m_cl->EnableOutputType(Baikal::Renderer::OutputType::kGloss);
+                    m_cl->EnableOutputType(Baikal::Renderer::OutputType::kDepth);
+                }
+
 
                 //set callbacks
                 using namespace std::placeholders;

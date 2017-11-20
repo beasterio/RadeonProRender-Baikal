@@ -46,6 +46,7 @@ namespace Baikal
         struct OutputData
         {
             std::unique_ptr<Baikal::Output> output;
+            std::vector<std::unique_ptr<Baikal::Output> > aovs; //additional aovs
 
 #ifdef ENABLE_DENOISER
             std::unique_ptr<Baikal::Output> output_position;
@@ -84,7 +85,8 @@ namespace Baikal
 
         //save cl frame buffer to file
         void SaveFrameBuffer(AppSettings& settings);
-        void SaveFrameBuffer(AppSettings& settings, const std::string& filename, int bpp);
+        void SaveFrameBuffer(Renderer::OutputType type, AppSettings& settings, const std::string& filename, int bpp);
+
         void SaveImage(const std::string& name, int width, int height, int bpp, const RadeonRays::float3* data);
 
         Baikal::PerspectiveCamera::Ptr GetCamera() { return m_camera; };
@@ -94,6 +96,9 @@ namespace Baikal
 
         void SetNumBounces(int num_bounces);
         void SetOutputType(Renderer::OutputType type);
+        //this will enable additional aov outputs
+        void EnableOutputType(Renderer::OutputType type);
+        void DisableOutputType(Renderer::OutputType type);
 #ifdef ENABLE_DENOISER        
         // Denoiser
         void SetDenoiserFloatParam(const std::string& name, const float4& value);

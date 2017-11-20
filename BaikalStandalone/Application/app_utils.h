@@ -69,7 +69,8 @@ namespace Baikal
         //folder to store AOV framebuffers
         std::string aov_out_folder;
         bool save_aov;
-        
+        int aov_samples;
+
         //file with scene lights description
         std::string light_set;
 
