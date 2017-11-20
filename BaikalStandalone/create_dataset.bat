@@ -1,16 +1,17 @@
 @ECHO OFF
 
 SET WIDTH=800
-SET HEIGHT=800
+SET HEIGHT=600
 
 SET OUTPUT_FOLDER=%1
-if [OUTPUT_FOLDER]==[] SET OUTPUT_FOLDER=./
+if "%OUTPUT_FOLDER%"=="" SET OUTPUT_FOLDER=./
 
-
-CALL :render_aovs ../Resources/CornellBox orig.objm camera.log ../../light1.ls %OUTPUT_FOLDER%/CornellBox
-CALL :render_aovs ../Resources/CornellBox orig.objm camera.log ../../light2.ls %OUTPUT_FOLDER%/CornellBox
-CALL :render_aovs ../Resources/sponza sponza.obj camera.log ../../light1.ls %OUTPUT_FOLDER%/Sponza
-CALL :render_aovs ../Resources/sponza sponza.obj camera.log ../../light2.ls %OUTPUT_FOLDER%/Sponza
+CALL :render_aovs ../Resources/CornellBox orig.objm cornellbox_cam.log ../../light2.ls %OUTPUT_FOLDER%/CornellBox
+CALL :render_aovs ../Resources/sponza sponza.obj sponza_cam.log ../../light2.ls %OUTPUT_FOLDER%/Sponza
+CALL :render_aovs ../Resources/salle_de_bain salle_de_bain.obj salle_de_bain_cam.log ../../light2.ls %OUTPUT_FOLDER%/salle_de_bain
+CALL :render_aovs ../Resources/san-miguel san-miguel.obj san-miguel_cam.log ../../light2.ls %OUTPUT_FOLDER%/san-miguel
+CALL :render_aovs ../Resources/cloister cloister.obj cloister_cam.log ../../light2.ls %OUTPUT_FOLDER%/cloister
+CALL :render_aovs ../Resources/kitchen kitchen.obj kitchen_cam.log ../../light2.ls %OUTPUT_FOLDER%/kitchen
 pause
 EXIT /B %ERRORLEVEL% 
 
@@ -38,7 +39,7 @@ for /f "tokens=*" %%a in (%CAMERA_LOG_FILE%) do (
     SET /A i+=1
     SET SUBDIR_CAM=!SUBDIR_LIGHT!/!i!
     IF NOT EXIST "!SUBDIR_CAM!" mkdir "!SUBDIR_CAM!"
-    "../Bin/Release/x64/BaikalStandalone64.exe" -w !WIDTH! -h !HEIGHT! -e ../Resources/Textures/Harbor_3_Free_Ref.hdr -p  %SCENE_FOLDER% -f %SCENE% -light_set !LIGHT_SET! -save_aov %%a -output_aov !SUBDIR_CAM! > NUL
+    "../Bin/Release/x64/BaikalStandalone64.exe" -w !WIDTH! -h !HEIGHT! -p  %SCENE_FOLDER% -f %SCENE% -light_set !LIGHT_SET! -save_aov %%a -output_aov !SUBDIR_CAM! > NUL
 )
 rem 
 EXIT /B 0
