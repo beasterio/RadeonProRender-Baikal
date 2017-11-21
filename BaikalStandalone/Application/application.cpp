@@ -280,7 +280,8 @@ namespace Baikal
                     if (ibl)
                     {
                         fs << "newlight ibl" << std::endl;
-                        fs << "tex " << m_settings.envmapname << std::endl;
+                        //image path should be stored as tex name
+                        fs << "tex " << ibl->GetTexture()->GetName() << std::endl;
                         fs << "mul " << std::to_string(ibl->GetMultiplier()) << std::endl;
                     }
                     else if (spotl)
@@ -309,19 +310,9 @@ namespace Baikal
                 g_is_l_pressed = false;
             }
         }
-
-        if (update)
-        {
-            //if (g_num_samples > -1)
-            {
-                m_settings.samplecount = 0;
-            }
-
-            m_cl->UpdateScene();
-        }
-
         if (m_settings.save_aov)
         {
+            static int line_number = 0;
             auto type = m_cl->GetOutputType();
             auto it = m_aov_samples.find(m_settings.samplecount);
             if (it != m_aov_samples.end())
@@ -337,16 +328,16 @@ namespace Baikal
                     //desired bits per pixel of stored image
                     int bpp;
                 };
-                std::vector<OutputDesc> output_desc_map = { { Renderer::OutputType::kColor, "color", "exr", 16 }, 
+                std::vector<OutputDesc> output_desc_map = { { Renderer::OutputType::kColor, "color", "exr", 16 },
                 { Renderer::OutputType::kViewShadingNormal, "view_shading_normal", "jpg", 8 },
                 { Renderer::OutputType::kDepth, "view_shading_depth", "exr", 16 },
                 { Renderer::OutputType::kAlbedo, "albedo", "jpg", 8 },
                 { Renderer::OutputType::kGloss, "gloss", "jpg", 8 } };
-                
+
                 //save all aovs
                 for (auto it_aov = output_desc_map.begin(); it_aov != output_desc_map.end(); ++it_aov)
                 {
-                    std::string out_name = m_settings.aov_out_folder + "/" + "aov_" + it_aov->type_str + "_f" + std::to_string(m_settings.samplecount) + "." + it_aov->ext;
+                    std::string out_name = m_settings.aov_out_folder + "/" + "cam_" + std::to_string(line_number) + "_aov_" + it_aov->type_str + "_f" + std::to_string(m_settings.samplecount) + "." + it_aov->ext;
                     m_cl->SaveFrameBuffer(it_aov->type, m_settings, out_name, it_aov->bpp);
                 }
                 m_aov_samples.erase(it);
@@ -356,10 +347,72 @@ namespace Baikal
             //closing app if aovs samples max is reached  
             if (m_aov_samples.empty())
             {
-                exit(0);
+                //read new camera position
+                if (m_camera_log_fs && !m_camera_log_fs.eof())
+                {
+                    line_number++;
+                    //read camera line
+                    std::string line;
+                    std::stringstream ss;
+                    std::getline(m_camera_log_fs, line);
+                    ss.str(line);
+                    std::vector<std::string> arg;
+                    std::vector<char*> argv;
+                    while (ss.rdbuf()->in_avail())
+                    {
+                        std::string val;
+                        ss >> val;
+                        arg.emplace_back(std::move(val));
+                    }
+                    for (auto & a : arg)
+                    {
+                        argv.push_back(&a[0]);
+                    }
 
+                    //parse
+                    AppCliParser cli;
+                    auto cam_settings = cli.Parse(argv.size(), argv.data());
+                    auto cam = m_cl->GetCamera();
+                    
+                    //change camera
+                    cam->LookAt(cam_settings.camera_pos,
+                                cam_settings.camera_at,
+                                cam_settings.camera_up);
+
+                    // Adjust sensor size based on current aspect ratio
+                    float aspect = (float)cam_settings.width / cam_settings.height;
+                    cam_settings.camera_sensor_size.y = cam_settings.camera_sensor_size.x / aspect;
+
+                    cam->SetSensorSize(cam_settings.camera_sensor_size);
+                    cam->SetDepthRange(cam_settings.camera_zcap);
+                    cam->SetFocalLength(cam_settings.camera_focal_length);
+                    cam->SetFocusDistance(cam_settings.camera_focus_distance);
+                    cam->SetAperture(cam_settings.camera_aperture);
+
+                    //prepare samples
+                    std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
+                    m_aov_samples.insert(samples_n.begin(), samples_n.end());
+                    update = true;
+                }
+                //nothing left to render
+                else
+                {
+                    exit(0);
+                }
             }
         }
+
+        if (update)
+        {
+            //if (g_num_samples > -1)
+            {
+                m_settings.samplecount = 0;
+            }
+
+            m_cl->UpdateScene();
+        }
+
+
 
         if (m_settings.num_samples == -1 || m_settings.samplecount <  m_settings.num_samples)
         {
@@ -417,12 +470,18 @@ namespace Baikal
         : m_window(nullptr)
         , m_num_triangles(0)
         , m_num_instances(0)
-        , m_aov_samples{1, 2, 4, 8}
+        , m_aov_samples{}
     {
         // Command line parsing
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
-        m_aov_samples.insert(m_settings.aov_samples);
+        m_camera_log_fs.open(m_settings.camera_log);
+        if (!m_camera_log_fs)
+        {
+            std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
+            m_aov_samples.insert(samples_n.begin(), samples_n.end());
+        }
+
         if (!m_settings.cmd_line_mode)
         {
             // Initialize GLFW

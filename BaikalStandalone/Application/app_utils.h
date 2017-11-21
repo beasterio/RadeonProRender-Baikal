@@ -64,6 +64,8 @@ namespace Baikal
         float camera_focus_distance;
         float camera_focal_length;
 
+        //file with camera positions
+        std::string camera_log;
         //folder to store camera position output
         std::string camera_out_folder;
         //folder to store AOV framebuffers
@@ -103,7 +105,7 @@ namespace Baikal
         AppSettings Parse(int argc, char * argv[]);
     private:
         char* GetCmdOption(char ** begin, char ** end, const std::string & option);
-        bool CmdOptionExists(char** begin, char** end, const std::string& option);
+        bool CmdOptionExists(char ** begin, char ** end, const std::string& option);
         void ShowHelp();
 
 

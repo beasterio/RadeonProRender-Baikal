@@ -62,5 +62,6 @@ namespace Baikal
 
         //frames to save AOVs
         std::set<int> m_aov_samples;
+        std::ifstream m_camera_log_fs;
     };
 }
