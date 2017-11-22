@@ -93,8 +93,14 @@ namespace Baikal
         char* camera_focal_length = GetCmdOption(argv, argv + argc, "-fl");
         s.camera_focal_length = camera_focal_length ? (float)atof(camera_focal_length) : s.camera_focal_length;
 
-        char* camera_log = GetCmdOption(argv, argv + argc, "-read_camera_log");
-        s.camera_log = camera_log ? camera_log : s.camera_log;
+        char* camera_set = GetCmdOption(argv, argv + argc, "-camera_set");
+        s.camera_set = camera_set ? camera_set : s.camera_set;
+
+        char* camera_set_min = GetCmdOption(argv, argv + argc, "-camera_set_min");
+        s.camera_set_min = camera_set_min ? atoi(camera_set_min) : s.camera_set_min;
+
+        char* camera_set_max = GetCmdOption(argv, argv + argc, "-camera_set_max");
+        s.camera_set_max = camera_set_max ? atoi(camera_set_max) : s.camera_set_max;
 
         char* out_folder = GetCmdOption(argv, argv + argc, "-output_cam");
         s.camera_out_folder = out_folder ? out_folder : s.camera_out_folder;
@@ -204,7 +210,9 @@ namespace Baikal
         , camera_focal_length(0.035f) // 35mm lens
 
         //output
-        , camera_log("")
+        , camera_set("")
+        , camera_set_min(1)
+        , camera_set_max(-1)
         , camera_out_folder(".")
         , aov_out_folder(".")
         , aov_samples(2048)

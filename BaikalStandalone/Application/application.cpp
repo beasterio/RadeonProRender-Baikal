@@ -350,24 +350,37 @@ namespace Baikal
                 //read new camera position
                 if (m_camera_log_fs && !m_camera_log_fs.eof())
                 {
-                    line_number++;
-                    //read camera line
-                    std::string line;
-                    std::stringstream ss;
-                    std::getline(m_camera_log_fs, line);
-                    ss.str(line);
+                    //close app if max is reached
+                    if (line_number == m_settings.camera_set_max)
+                    {
+                        exit(0);
+                    }
+
                     std::vector<std::string> arg;
                     std::vector<char*> argv;
-                    while (ss.rdbuf()->in_avail())
+                    do
                     {
-                        std::string val;
-                        ss >> val;
-                        arg.emplace_back(std::move(val));
-                    }
-                    for (auto & a : arg)
-                    {
-                        argv.push_back(&a[0]);
-                    }
+                        line_number++;
+
+                        arg.clear();
+                        argv.clear();
+                        //read camera line
+                        std::string line;
+                        std::stringstream ss;
+                        std::getline(m_camera_log_fs, line);
+                        ss.str(line);
+
+                        while (ss.rdbuf()->in_avail())
+                        {
+                            std::string val;
+                            ss >> val;
+                            arg.emplace_back(std::move(val));
+                        }
+                        for (auto & a : arg)
+                        {
+                            argv.push_back(&a[0]);
+                        }
+                    } while (!m_camera_log_fs.eof() && line_number < m_settings.camera_set_min);
 
                     //parse
                     AppCliParser cli;
@@ -475,7 +488,7 @@ namespace Baikal
         // Command line parsing
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
-        m_camera_log_fs.open(m_settings.camera_log);
+        m_camera_log_fs.open(m_settings.camera_set);
         if (!m_camera_log_fs)
         {
             std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
