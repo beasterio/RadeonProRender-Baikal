@@ -339,6 +339,7 @@ namespace Baikal
                 {
                     std::string out_name = m_settings.aov_out_folder + "/" + "cam_" + std::to_string(line_number) + "_aov_" + it_aov->type_str + "_f" + std::to_string(m_settings.samplecount) + "." + it_aov->ext;
                     m_cl->SaveFrameBuffer(it_aov->type, m_settings, out_name, it_aov->bpp);
+                    std::cerr << "    saved " << out_name << std::endl;
                 }
                 m_aov_samples.erase(it);
 
@@ -402,6 +403,9 @@ namespace Baikal
                     cam->SetFocusDistance(cam_settings.camera_focus_distance);
                     cam->SetAperture(cam_settings.camera_aperture);
 
+                    std::cerr << "Current camera N" << line_number << ": p(" << cam_settings.camera_pos.x << ", " << cam_settings.camera_pos.y << ", " << cam_settings.camera_pos.z << ")"
+                                                                    << " at(" << cam_settings.camera_at.x << ", " << cam_settings.camera_at.y << ", " << cam_settings.camera_at.z << ")" 
+                                                                    << std::endl;
                     //prepare samples
                     std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
                     m_aov_samples.insert(samples_n.begin(), samples_n.end());
