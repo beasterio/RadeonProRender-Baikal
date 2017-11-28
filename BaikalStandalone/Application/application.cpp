@@ -393,11 +393,6 @@ namespace Baikal
                                 cam_settings.camera_at,
                                 cam_settings.camera_up);
 
-                    // Adjust sensor size based on current aspect ratio
-                    float aspect = (float)cam_settings.width / cam_settings.height;
-                    cam_settings.camera_sensor_size.y = cam_settings.camera_sensor_size.x / aspect;
-
-                    cam->SetSensorSize(cam_settings.camera_sensor_size);
                     cam->SetDepthRange(cam_settings.camera_zcap);
                     cam->SetFocalLength(cam_settings.camera_focal_length);
                     cam->SetFocusDistance(cam_settings.camera_focus_distance);
