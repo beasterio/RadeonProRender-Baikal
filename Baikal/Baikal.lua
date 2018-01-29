@@ -4,7 +4,10 @@ project "Baikal"
     links {"CLW", "Calc", "FreeImage"}
     files { "../Baikal/**.inl", "../Baikal/**.h", "../Baikal/**.cpp", "../Baikal/**.cl", "../Baikal/**.fsh", "../Baikal/**.vsh" }
 
-    includedirs{ "../RadeonRays/RadeonRays/include", "../RadeonRays/CLW", "."}
+    includedirs{ "../RadeonRays/RadeonRays/include", 
+                "../RadeonRays/CLW", 
+                "../3rdparty/vulkan",
+                "."}
 
     if os.is("macosx") then
         sysincludedirs {"/usr/local/include"}

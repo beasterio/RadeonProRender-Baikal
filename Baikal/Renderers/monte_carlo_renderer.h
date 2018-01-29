@@ -40,7 +40,7 @@ namespace Baikal
     struct ClwScene;
 
     ///< Renderer implementation
-    class MonteCarloRenderer : public Renderer, protected ClwClass
+    class MonteCarloRenderer : public Renderer<ClwScene>, protected ClwClass
     {
     public:
 

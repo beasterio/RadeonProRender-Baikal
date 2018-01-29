@@ -47,7 +47,7 @@ namespace Baikal
         ClwRenderFactory(CLWContext context, std::string const& cache_path="");
 
         // Create a renderer of specified type
-        std::unique_ptr<Renderer> 
+        std::unique_ptr<Renderer<ClwScene> > 
             CreateRenderer(RendererType type) const override;
         // Create an output of specified type
         std::unique_ptr<Output> 

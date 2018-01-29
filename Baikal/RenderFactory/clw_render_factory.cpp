@@ -26,13 +26,13 @@ namespace Baikal
     }
 
     // Create a renderer of specified type
-    std::unique_ptr<Renderer> ClwRenderFactory::CreateRenderer(
+    std::unique_ptr<Renderer<ClwScene>> ClwRenderFactory::CreateRenderer(
                                                     RendererType type) const
     {
         switch (type)
         {
             case RendererType::kUnidirectionalPathTracer:
-                return std::unique_ptr<Renderer>(
+                return std::unique_ptr<Renderer<ClwScene>>(
                     new MonteCarloRenderer(
                         m_context, 
                         std::make_unique<PathTracingEstimator>(m_context, m_intersector, m_cache_path),

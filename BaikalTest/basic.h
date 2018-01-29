@@ -118,7 +118,7 @@ public:
         ASSERT_NO_THROW(m_renderer = m_factory->CreateRenderer(Baikal::ClwRenderFactory::RendererType::kUnidirectionalPathTracer));
         ASSERT_NO_THROW(m_controller = m_factory->CreateSceneController());
         ASSERT_NO_THROW(m_output = m_factory->CreateOutput(kOutputWidth, kOutputHeight));
-        ASSERT_NO_THROW(m_renderer->SetOutput(Baikal::Renderer::OutputType::kColor, m_output.get()));
+        ASSERT_NO_THROW(m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kColor, m_output.get()));
 
         ASSERT_NO_THROW(LoadTestScene());
         ASSERT_NO_THROW(SetupCamera());
@@ -287,7 +287,7 @@ public:
         return std::find(begin, end, option) != end;
     }
 
-    std::unique_ptr<Baikal::Renderer> m_renderer;
+    std::unique_ptr<Baikal::Renderer<Baikal::ClwScene>> m_renderer;
     std::unique_ptr<Baikal::SceneController<Baikal::ClwScene>> m_controller;
     std::unique_ptr<Baikal::RenderFactory<Baikal::ClwScene>> m_factory;
     std::unique_ptr<Baikal::Output> m_output;

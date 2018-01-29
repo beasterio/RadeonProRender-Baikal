@@ -33,6 +33,10 @@ newoption {
     description = "Embed CL kernels into binary module"
 }
 
+newoption {
+    trigger     = "use_vulkan",
+    description = "enable vulkan for Baikal and RadeonRays"
+}
 
 solution "Baikal"
 platforms {"x64"}

@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include "CLW.h"
 #include "RenderFactory/render_factory.h"
+#include "SceneGraph/clwscene.h"
 
 #ifndef APP_BENCHMARK
 

@@ -28,10 +28,6 @@ THE SOFTWARE.
 #include <vector>
 #include <memory>
 
-namespace Baikal
-{
-    class Renderer;
-}
 
 class ConfigManager
 {
@@ -55,7 +51,7 @@ public:
     struct Config
     {
         DeviceType type;
-        std::unique_ptr<Baikal::Renderer> renderer;
+        std::unique_ptr<Baikal::Renderer<Baikal::ClwScene>> renderer;
         std::unique_ptr<Baikal::SceneController<Baikal::ClwScene>> controller;
         std::unique_ptr<Baikal::RenderFactory<Baikal::ClwScene>> factory;
         CLWContext context;
