@@ -24,6 +24,7 @@
 
 #include "render_factory.h"
 #include "radeon_rays_cl.h"
+
 #include "CLW.h"
 
 #include "SceneGraph/vkscene.h"

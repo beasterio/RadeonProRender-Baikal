@@ -80,7 +80,7 @@ namespace Baikal
 
         inline Baikal::Camera::Ptr GetCamera() { return m_camera; };
         inline Baikal::Scene1::Ptr GetScene() { return m_scene; };
-        inline CLWDevice GetDevice(int i) { return m_cfgs[m_primary].context.GetDevice(i); };
+//        inline CLWDevice GetDevice(int i) { return m_cfgs[m_primary].context.GetDevice(i); };
         inline Renderer<ClwScene>::OutputType GetOutputType() { return m_output_type; };
 
         void SetNumBounces(int num_bounces);
@@ -108,5 +108,6 @@ namespace Baikal
         // //save GL tex for no interop case
         // GLuint m_tex;
         Renderer<ClwScene>::OutputType m_output_type;
+        std::unique_ptr<Baikal::Output> m_output;
     };
 }

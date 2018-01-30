@@ -28,7 +28,7 @@ project "Baikal"
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
-        "../3rdparty/glfw/lib/%{cfg.platform}" }
+                    "../3rdparty/glfw/lib/%{cfg.platform}" }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
                 "NOMINMAX"}

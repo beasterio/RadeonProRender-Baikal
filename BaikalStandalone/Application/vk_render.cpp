@@ -33,6 +33,7 @@ namespace Baikal
 
     void AppVkRender::InitVk(AppSettings& settings, GLuint tex)
     {
+        m_primary = 0;
         ConfigManager::CreateConfigs(
             settings.mode,
             settings.interop,
@@ -40,24 +41,42 @@ namespace Baikal
             settings.num_bounces,
             settings.platform_index,
             settings.device_index);
+
     }
 
-    //copy data from to GL
+    //copy data from Vk to GL
     void AppVkRender::Update(AppSettings& settings)
     {
-
+        //TODO: add interop
     }
 
     //compile scene
     void AppVkRender::UpdateScene()
     {
 
+        for (int i = 0; i < m_cfgs.size(); ++i)
+        {
+            if (i == m_primary)
+            {
+                m_cfgs[i].controller->CompileScene(m_scene);
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_output);
+
+#ifdef ENABLE_DENOISER
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_normal);
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_position);
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_albedo);
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_mesh_id);
+#endif
+
+            }
+        }
     }
 
     //render
     void AppVkRender::Render(int sample_cnt)
     {
-
+        auto& scene = m_cfgs[m_primary].controller->GetCachedScene(m_scene);
+        m_cfgs[m_primary].renderer->Render(scene);
     }
 
     void AppVkRender::StartRenderThreads()

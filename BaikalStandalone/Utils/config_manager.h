@@ -29,6 +29,11 @@ THE SOFTWARE.
 #include <vector>
 #include <memory>
 
+namespace vks
+{
+    class VulkanDevice;
+}
+
 
 class ConfigManager
 {
@@ -73,8 +78,20 @@ public:
         std::unique_ptr<Baikal::Renderer<Baikal::VkScene>> renderer;
         std::unique_ptr<Baikal::SceneController<Baikal::VkScene>> controller;
         std::unique_ptr<Baikal::RenderFactory<Baikal::VkScene>> factory;
-        CLWContext context;
         bool caninterop;
+
+        VkInstance instance;
+        // Stores physical device properties (for e.g. checking device limits)
+        VkPhysicalDeviceProperties device_properties;
+        // Stores the features available on the selected physical device (for e.g. checking if a feature is available)
+        VkPhysicalDeviceFeatures device_features;
+        // Stores all available memory (type) properties for the physical device
+        VkPhysicalDeviceMemoryProperties device_memory_roperties;
+        vks::VulkanDevice *vulkan_device;
+        VkQueue queue;
+
+        std::vector<const char*> enabled_extensions;
+        VkPhysicalDeviceFeatures enabled_features{};
 
         VkConfig() = default;
 
@@ -83,6 +100,9 @@ public:
         ~VkConfig()
         {
         }
+
+        VkResult CreateInstance(bool enableValidation);
+        void GetEnabledFeatures();
     };
 
     static void CreateConfigs(

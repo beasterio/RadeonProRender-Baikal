@@ -40,6 +40,10 @@ THE SOFTWARE.
 #include <GL/glx.h>
 #endif
 
+#include "Vulkan/VulkanDebug.h"
+#include "Vulkan/VulkanTools.h"
+#include "Vulkan/VulkanDevice.hpp"
+
 void ConfigManager::CreateConfigs(
     Mode mode,
     bool interop,
@@ -238,11 +242,151 @@ void ConfigManager::CreateConfigs(
     int req_device_index)
 {
     configs.clear();
+    configs.push_back(VkConfig());
+    //use only 1st available device
+    VkConfig& conf = configs[0];
+
+    VkResult err;
+    bool enableValidation = true;
+    // Vulkan instance
+    err = configs[0].CreateInstance(enableValidation);
+    if (err)
+    {
+        throw std::runtime_error("Could not create Vulkan instance : \n" + vks::tools::errorString(err));
+    }
+
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    vks::android::loadVulkanFunctions(instance);
+#endif
+
+    // If requested, we enable the default validation layers for debugging
+    if (enableValidation)
+    {
+        // The report flags determine what type of messages for the layers will be displayed
+        // For validating (debugging) an application the error and warning bits should suffice
+        VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+        // Additional flags include performance info, loader and layer debug messages, etc.
+        vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
+    }
+
+    // Physical device
+    uint32_t gpuCount = 0;
+    // Get number of available physical devices
+    VK_CHECK_RESULT(vkEnumeratePhysicalDevices(conf.instance, &gpuCount, nullptr));
+    assert(gpuCount > 0);
+    // Enumerate devices
+    std::vector<VkPhysicalDevice> physicalDevices(gpuCount);
+    err = vkEnumeratePhysicalDevices(conf.instance, &gpuCount, physicalDevices.data());
+    if (err)
+    {
+        throw std::runtime_error("Could not enumerate physical devices : \n" + vks::tools::errorString(err));
+    }
+
+    // GPU selection
+
+    // Select physical device to be used for the Vulkan example
+    // Defaults to the first device unless specified by command line
+    uint32_t selectedDevice = 0;
+    auto physicalDevice = physicalDevices[selectedDevice];
+
+    // Store properties (including limits), features and memory properties of the physical device (so that examples can check against them)
+    vkGetPhysicalDeviceProperties(physicalDevice, &conf.device_properties);
+    vkGetPhysicalDeviceFeatures(physicalDevice, &conf.device_features);
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &conf.device_memory_roperties);
+
+    // Derived examples can override this to set actual features (based on above readings) to enable for logical device creation
+    conf.GetEnabledFeatures();
+
+    // Vulkan device creation
+    // This is handled by a separate class that gets a logical device representation
+    // and encapsulates functions related to a device
+    conf.vulkan_device = new vks::VulkanDevice(physicalDevice);
+    VkResult res = conf.vulkan_device->createLogicalDevice(conf.enabled_features, conf.enabled_extensions);
+    if (res != VK_SUCCESS)
+    {
+        throw std::runtime_error("Could not create Vulkan device: \n" + vks::tools::errorString(res));
+    }
+    auto& device = conf.vulkan_device->logicalDevice;
+
+    // Get a graphics queue from the device
+    vkGetDeviceQueue(device, conf.vulkan_device->queueFamilyIndices.graphics, 0, &conf.queue);
 
     for (int i = 0; i < configs.size(); ++i)
     {
         configs[i].factory = std::make_unique<Baikal::VkRenderFactory>();
         configs[i].controller = configs[i].factory->CreateSceneController();
         configs[i].renderer = configs[i].factory->CreateRenderer(Baikal::VkRenderFactory::RendererType::kUnidirectionalPathTracer);
+    }
+}
+
+VkResult ConfigManager::VkConfig::CreateInstance(bool enableValidation)
+{
+    const char* app_name = "Baikal standalone.";
+    VkApplicationInfo appInfo = {};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = app_name;
+    appInfo.pEngineName = app_name;
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+
+    std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
+
+    // Enable surface extensions depending on os
+#if defined(_WIN32)
+    instanceExtensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#elif defined(VK_USE_PLATFORM_ANDROID_KHR)
+    instanceExtensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+#elif defined(_DIRECT2DISPLAY)
+    instanceExtensions.push_back(VK_KHR_DISPLAY_EXTENSION_NAME);
+#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
+    instanceExtensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+#elif defined(VK_USE_PLATFORM_XCB_KHR)
+    instanceExtensions.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+#elif defined(VK_USE_PLATFORM_IOS_MVK)
+    instanceExtensions.push_back(VK_MVK_IOS_SURFACE_EXTENSION_NAME);
+#elif defined(VK_USE_PLATFORM_MACOS_MVK)
+    instanceExtensions.push_back(VK_MVK_MACOS_SURFACE_EXTENSION_NAME);
+#endif
+
+    VkInstanceCreateInfo instanceCreateInfo = {};
+    instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instanceCreateInfo.pNext = NULL;
+    instanceCreateInfo.pApplicationInfo = &appInfo;
+    if (instanceExtensions.size() > 0)
+    {
+        if (enableValidation)
+        {
+            instanceExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+        }
+        instanceCreateInfo.enabledExtensionCount = (uint32_t)instanceExtensions.size();
+        instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
+    }
+    if (enableValidation)
+    {
+        instanceCreateInfo.enabledLayerCount = vks::debug::validationLayerCount;
+        instanceCreateInfo.ppEnabledLayerNames = vks::debug::validationLayerNames;
+    }
+    return vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
+}
+
+void ConfigManager::VkConfig::GetEnabledFeatures()
+{
+    // Enable anisotropic filtering if supported
+    if (device_features.samplerAnisotropy) {
+        enabled_features.samplerAnisotropy = VK_TRUE;
+    }
+    // Enable texture compression  
+    if (device_features.textureCompressionBC) {
+        enabled_features.textureCompressionBC = VK_TRUE;
+    }
+    else if (device_features.textureCompressionASTC_LDR) {
+        enabled_features.textureCompressionASTC_LDR = VK_TRUE;
+    }
+    else if (device_features.textureCompressionETC2) {
+        enabled_features.textureCompressionETC2 = VK_TRUE;
+    }
+
+    if (device_features.shaderStorageImageExtendedFormats)
+    {
+        enabled_features.shaderStorageImageExtendedFormats = VK_TRUE;
     }
 }

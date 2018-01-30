@@ -39,7 +39,6 @@ THE SOFTWARE.
 #include <thread>
 #include <chrono>
 
-
 #include "PostEffects/wavelet_denoiser.h"
 #include "Utils/clw_class.h"
 

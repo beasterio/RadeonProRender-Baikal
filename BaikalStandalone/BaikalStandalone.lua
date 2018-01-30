@@ -1,7 +1,7 @@
 project "BaikalStandalone"
     kind "ConsoleApp"
     location "../BaikalStandalone"
-    links {"Baikal", "RadeonRays", "Calc", "CLW"}
+    links {"Baikal", "RadeonRays", "Calc", "CLW", "vulkan-1"}
     files { "../BaikalStandalone/**.inl", "../BaikalStandalone/**.h", "../BaikalStandalone/**.cpp", "../BaikalStandalone/**.cl", "../BaikalStandalone/**.fsh", "../BaikalStandalone/**.vsh" }
 
     includedirs{ "../RadeonRays/RadeonRays/include", 
@@ -28,7 +28,9 @@ project "BaikalStandalone"
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
-                    "../3rdparty/glfw/lib/%{cfg.platform}" }
+                    "../3rdparty/glfw/lib/%{cfg.platform}",
+                    "../3rdparty/vulkan",
+                    }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
                 "NOMINMAX"}
