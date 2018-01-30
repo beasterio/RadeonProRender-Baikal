@@ -30,7 +30,8 @@ project "BaikalStandalone"
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/glfw/lib/%{cfg.platform}" }
 
-        defines{"VK_USE_PLATFORM_WIN32_KHR"}
+        defines{"VK_USE_PLATFORM_WIN32_KHR",
+                "NOMINMAX"}
 
         configuration {"Debug"}
             links {"OpenImageIOD"}
