@@ -4,7 +4,10 @@ project "BaikalStandalone"
     links {"Baikal", "RadeonRays", "Calc", "CLW"}
     files { "../BaikalStandalone/**.inl", "../BaikalStandalone/**.h", "../BaikalStandalone/**.cpp", "../BaikalStandalone/**.cl", "../BaikalStandalone/**.fsh", "../BaikalStandalone/**.vsh" }
 
-    includedirs{ "../RadeonRays/RadeonRays/include", "../RadeonRays/CLW", "../Baikal", "."}
+    includedirs{ "../RadeonRays/RadeonRays/include", 
+                "../RadeonRays/CLW", "../Baikal", 
+                "../3rdparty/vulkan",
+                "."}
 
     if os.is("macosx") then
         sysincludedirs {"/usr/local/include"}

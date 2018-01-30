@@ -378,7 +378,8 @@ namespace Baikal
             try
             {
                 m_gl.reset(new AppGlRender(m_settings));
-                m_cl.reset(new AppClRender(m_settings, m_gl->GetTexture()));
+                //m_cl.reset(new AppClRender(m_settings, m_gl->GetTexture()));
+                m_cl.reset(new AppVkRender(m_settings, m_gl->GetTexture()));
 
                 //set callbacks
                 using namespace std::placeholders;
@@ -397,7 +398,7 @@ namespace Baikal
         else
         {
             m_settings.interop = false;
-            m_cl.reset(new AppClRender(m_settings, -1));
+            //m_cl.reset(new AppClRender(m_settings, -1));
         }
     }
 
@@ -436,7 +437,7 @@ namespace Baikal
         }
         else
         {
-            m_cl.reset(new AppClRender(m_settings, -1));
+            //m_cl.reset(new AppClRender(m_settings, -1));
                         
             std::cout << "Number of triangles: " << m_num_triangles << "\n";
             std::cout << "Number of instances: " << m_num_instances << "\n";
@@ -499,9 +500,9 @@ namespace Baikal
             ImGui::Text("Mouse+RMB to look around");
             ImGui::Text("F1 to hide/show GUI");
             ImGui::Separator();
-            ImGui::Text("Device vendor: %s", m_cl->GetDevice(0).GetVendor().c_str());
-            ImGui::Text("Device name: %s", m_cl->GetDevice(0).GetName().c_str());
-            ImGui::Text("OpenCL: %s", m_cl->GetDevice(0).GetVersion().c_str());
+            //ImGui::Text("Device vendor: %s", m_cl->GetDevice(0).GetVendor().c_str());
+            //ImGui::Text("Device name: %s", m_cl->GetDevice(0).GetName().c_str());
+            //ImGui::Text("OpenCL: %s", m_cl->GetDevice(0).GetVersion().c_str());
             ImGui::Separator();
             ImGui::Text("Resolution: %dx%d ", m_settings.width, m_settings.height);
             ImGui::Text("Scene: %s", m_settings.modelname.c_str());

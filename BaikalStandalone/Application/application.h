@@ -24,6 +24,7 @@
 
 #include "Application/app_utils.h"
 #include "Application/cl_render.h"
+#include "Application/vk_render.h"
 #include "Application/gl_render.h"
 
 #include <memory>
@@ -54,7 +55,8 @@ namespace Baikal
         static void OnMouseButton(GLFWwindow* window, int button, int action, int mods);
 
         AppSettings m_settings;
-        std::unique_ptr<AppClRender> m_cl;
+        //std::unique_ptr<AppClRender> m_cl;
+        std::unique_ptr<AppVkRender> m_cl;
         std::unique_ptr<AppGlRender> m_gl;
 
         GLFWwindow* m_window;

@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include "CLW.h"
 #include "RenderFactory/clw_render_factory.h"
+#include "RenderFactory/vk_render_factory.h"
 #include "Renderers/renderer.h"
 #include <vector>
 #include <memory>
@@ -66,10 +67,36 @@ public:
         }
     };
 
+    struct VkConfig
+    {
+        DeviceType type;
+        std::unique_ptr<Baikal::Renderer<Baikal::VkScene>> renderer;
+        std::unique_ptr<Baikal::SceneController<Baikal::VkScene>> controller;
+        std::unique_ptr<Baikal::RenderFactory<Baikal::VkScene>> factory;
+        CLWContext context;
+        bool caninterop;
+
+        VkConfig() = default;
+
+        VkConfig(VkConfig&& cfg) = default;
+
+        ~VkConfig()
+        {
+        }
+    };
+
     static void CreateConfigs(
         Mode mode,
         bool interop,
         std::vector<Config>& renderers,
+        int initial_num_bounces,
+        int req_platform_index = -1,
+        int req_device_index = -1);
+
+    static void CreateConfigs(
+        Mode mode,
+        bool interop,
+        std::vector<VkConfig>& renderers,
         int initial_num_bounces,
         int req_platform_index = -1,
         int req_device_index = -1);
