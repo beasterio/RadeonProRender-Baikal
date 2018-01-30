@@ -6,7 +6,9 @@ project "Baikal"
 
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", 
+                "../3rdparty",
                 "../3rdparty/vulkan",
+                "../3rdparty/glm",
                 "."}
 
     if os.is("macosx") then
@@ -28,6 +30,7 @@ project "Baikal"
                     "../3rdparty/oiio/lib/%{cfg.platform}",
         "../3rdparty/glfw/lib/%{cfg.platform}" }
 
+        defines{"VK_USE_PLATFORM_WIN32_KHR"}
         configuration {"Debug"}
             links {"OpenImageIOD"}
         configuration {"Release"}

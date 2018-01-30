@@ -1,0 +1,225 @@
+#version 450
+#define PI 3.14159265358979323846
+#define LIGHT_COUNT 3
+#define TILE_SIZE 16
+#define RAY_LENGTH 1000.0
+#define CMJ_CELL_SIZE 4
+#define CMJ_CELL_SAMPLE_COUNT (CMJ_CELL_SIZE * CMJ_CELL_SIZE)
+#define RNG_BUFFER_SIZE (256 * 256)
+
+struct Light 
+{
+    vec4 position;
+    vec4 target;
+    vec4 color;
+    mat4 viewMatrix;
+};
+
+struct Ray
+{
+  vec3 direction;
+  float time;
+  vec3 origin;
+  float max_t;
+};
+
+layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout (binding = 0) uniform usampler2D samplerData0;
+layout (binding = 2) uniform UBO 
+{
+    vec4 viewPos;
+    mat4 view;
+    mat4 invView;
+    mat4 invProj;
+    vec4 params;
+    Light lights[LIGHT_COUNT];
+} ubo;
+
+layout(binding = 3) buffer Rays 
+{
+  Ray rays[];
+};
+
+layout(binding = 4) buffer Rng 
+{
+  uint rng[];
+};
+
+// CMJ sampling
+uint Permute(uint i, uint l, uint p)
+{
+    uint w = l - 1;
+    w |= w >> 1;
+    w |= w >> 2;
+    w |= w >> 4;
+    w |= w >> 8;
+    w |= w >> 16;
+
+    do
+    {
+        i ^= p;
+        i *= 0xe170893d;
+        i ^= p >> 16;
+        i ^= (i & w) >> 4;
+        i ^= p >> 8;
+        i *= 0x0929eb3f;
+        i ^= p >> 23;
+        i ^= (i & w) >> 1;
+        i *= 1 | p >> 27;
+        i *= 0x6935fa69;
+        i ^= (i & w) >> 11;
+        i *= 0x74dcb303;
+        i ^= (i & w) >> 2;
+        i *= 0x9e501cc3;
+        i ^= (i & w) >> 2;
+        i *= 0xc860a3df;
+        i &= w;
+        i ^= i >> 5;
+    } while (i >= l);
+    return (i + p) % l;
+}
+
+float RandFloat(uint i, uint p)
+{
+    i ^= p;
+    i ^= i >> 17;
+    i ^= i >> 10;
+    i *= 0xb36534e5;
+    i ^= i >> 12;
+    i ^= i >> 21;
+    i *= 0x93fc4795;
+    i ^= 0xdf6e307f;
+    i ^= i >> 17;
+    i *= 1 | p >> 18;
+    return i * (1.0 / 4294967808.0);
+}
+
+vec2 SampleCMJ(uint s, uint n, uint p)
+{
+    uint sx = Permute(s % n, n, p * 0xa511e9b3);
+    uint sy = Permute(s / n, n, p * 0x63d83595);
+    float jx = RandFloat(s, p * 0xa399d265);
+    float jy = RandFloat(s, p * 0x711ad6a5);
+
+    return vec2((s % n + (sy + jx) / n) / n, (s / n + (sx + jy) / n) / n);
+}
+
+vec3 OrthoVector(vec3 n)
+{
+    vec3 p;
+
+    if (abs(n.z) > 0.0) 
+    {
+        float k = sqrt(n.y*n.y + n.z*n.z);
+        p.x = 0; p.y = -n.z/k; p.z = n.y/k;
+    }
+    else 
+    {
+        float k = sqrt(n.x*n.x + n.y*n.y);
+        p.x = n.y/k; p.y = -n.x/k; p.z = 0;
+    }
+
+    return p;
+}
+
+float nrand( vec2 n )
+{
+    return fract(sin(dot(n.xy, vec2(12.9898f, 78.233f))) * 43758.5453f);
+}
+
+vec3 MapToHemisphere(vec2 s, vec3 n, float e)
+{
+    // Construct basis
+    vec3 u = OrthoVector(n);
+    vec3 v = cross(u, n);
+    u = cross(n, v);
+    
+    // Calculate 2D sample
+    float r1 = s.x;
+    float r2 = s.y;
+    
+    // Transform to spherical coordinates
+    float sinPsi = sin(2*PI*r1);
+    float cosPsi = cos(2*PI*r1);
+    float cosTheta = pow(1.0 - r2, 1.0 / (e + 1.0));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    
+    // Return the result
+    return normalize(u * sinTheta * cosPsi + v * sinTheta * sinPsi + n * cosTheta);
+}
+
+vec2 hash2( float n ) { return fract(sin(vec2(n,n+1.0))*vec2(43758.5453123,22578.1459123)); }
+
+// Spheremap Transform
+vec3 DecodeNormal(uvec2 enc)
+{
+    vec2 enc_n = vec2(enc.xy) / 65535.0f;
+    enc_n = enc_n * 2.0f - vec2(1.0f);
+
+    vec4 nn = enc_n.xyxx * vec4(2,2,0,0) + vec4(-1,-1, 1,-1);
+    float l = abs(dot(nn.xyz,-nn.xyw));
+    nn.z = l;
+    nn.xy *= sqrt(l);
+    return nn.xyz * 2 + vec3(0,0,-1);
+}
+
+vec3 ReconstructVSPositionFromDepth(vec2 uv, float depth)
+{
+    uv = uv * vec2(2.0f, 2.0f) - vec2(1.0f, 1.0f);
+
+    vec4 projPos = vec4(uv, depth, 1.0f);
+    vec4 viewPos = ubo.invProj * projPos;
+
+    return viewPos.xyz / viewPos.w;
+}
+
+// Decode depth z/w - 24 bits, mesh id - 8 bits
+vec2 DecodeDepthAndMeshID(uvec2 data)
+{
+    float meshID 		= float(data.y & 0xFF);
+    uint depthHighBits 	= ((data.y >> 8) & 0xFF) << 16;
+    float depth 		= float(depthHighBits | data.x) / 16777215.0f;
+
+    return vec2(depth, meshID);
+}
+
+void main() 
+{
+    ivec2 bufferSize = textureSize(samplerData0, 0);
+    
+    const vec2 uv = vec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y) / vec2(bufferSize);
+    
+    const uvec4 encodedData = texture(samplerData0, uv);
+    vec3 normal = normalize(DecodeNormal(encodedData.xy));
+	vec3 N = normalize((ubo.invView * vec4(normal, 0.0f)).xyz);
+	vec3 pos = ReconstructVSPositionFromDepth(uv, DecodeDepthAndMeshID(encodedData.zw).x);
+	vec3 wPos = (ubo.invView * vec4(pos, 1.0f)).xyz;
+	
+	
+	vec3 viewPos = ubo.viewPos.xyz;
+	viewPos.y = -viewPos.y;
+	vec3 wView = normalize(viewPos - wPos);
+	
+	if (dot(N, wView) < 0.0) 
+	{
+		N = -N;
+	}
+
+    uint groupSize = TILE_SIZE * TILE_SIZE;
+    uint flatGroupIndex = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    uint rayIndex = flatGroupIndex * groupSize + gl_LocalInvocationID.y * TILE_SIZE + gl_LocalInvocationID.x;
+
+    uint frameCount = uint(ubo.viewPos.w);
+    uint cmjSequenceIndex = (frameCount + rng[rayIndex % (256 * 256)]) % CMJ_CELL_SAMPLE_COUNT;
+    uint cmjPatternIndex = (rayIndex + 1) * (frameCount / CMJ_CELL_SAMPLE_COUNT + 1);
+
+    vec2 cmjSample = SampleCMJ(cmjSequenceIndex, CMJ_CELL_SIZE, cmjPatternIndex);
+	
+    Ray myRay;
+	myRay.origin = wPos + N * 0.1;
+	myRay.direction = cmjSample.x < 0.25 ? reflect(-wView, N) : MapToHemisphere(cmjSample, N, 1.0);
+	myRay.time = 0.0;
+
+    myRay.max_t = RAY_LENGTH;
+    rays[rayIndex] = myRay;
+}

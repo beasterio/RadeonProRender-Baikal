@@ -1,0 +1,69 @@
+#version 450
+#define PI 3.14159265358979323846
+#define LIGHT_COUNT 3
+#define TILE_SIZE 16
+#define INVALID_ADDR 0xffffffffu
+
+struct Light 
+{
+    vec4 position;
+    vec4 target;
+    vec4 color;
+    mat4 viewMatrix;
+};
+
+struct Ray
+{
+  vec3 direction;
+  float time;
+  vec3 origin;
+  float max_t;
+};
+
+
+struct Hit 
+{
+    uint shape_id;
+    uint prim_id;
+    vec2 uv;
+};
+
+
+layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout (binding = 0, rgba16f) uniform image2D resultImage;
+layout (binding = 1) uniform UBO 
+{
+    vec4 viewPos;
+    mat4 view;
+    mat4 invView;
+    mat4 invProj;
+    vec4 params;
+    Light lights[LIGHT_COUNT];
+} ubo;
+layout(binding = 2) buffer Hits 
+{
+  Hit hits[];
+};
+
+layout(push_constant) uniform PushConsts {
+	int clear;
+} pushConsts;
+
+
+void main() 
+{
+    uint groupSize = TILE_SIZE * TILE_SIZE;
+    uint flatGroupIndex = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    uint rayIndex = flatGroupIndex * groupSize + gl_LocalInvocationID.y * TILE_SIZE + gl_LocalInvocationID.x;
+
+    vec4 value = pushConsts.clear == 1 ? vec4(0.0f) : imageLoad(resultImage, ivec2(gl_GlobalInvocationID.xy));
+
+    if (hits[rayIndex].shape_id == INVALID_ADDR)
+    {
+        value.xyz += 1.0;
+    }
+
+    value.w += 1.0;
+
+    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), value);
+}

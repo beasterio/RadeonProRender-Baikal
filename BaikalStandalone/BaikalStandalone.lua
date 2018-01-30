@@ -6,7 +6,9 @@ project "BaikalStandalone"
 
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", "../Baikal", 
+                "../3rdparty",
                 "../3rdparty/vulkan",
+                "../3rdparty/glm",
                 "."}
 
     if os.is("macosx") then
@@ -27,6 +29,8 @@ project "BaikalStandalone"
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/glfw/lib/%{cfg.platform}" }
+
+        defines{"VK_USE_PLATFORM_WIN32_KHR"}
 
         configuration {"Debug"}
             links {"OpenImageIOD"}

@@ -1,0 +1,54 @@
+#version 450
+#define GROUP_SIZE 64
+
+struct Texture
+{
+    uint w, h;
+    uint data_offset;
+	uint unused;
+};
+
+layout (local_size_x = GROUP_SIZE, local_size_y = 1) in;
+
+layout (binding = 0) uniform sampler2D texture;
+
+layout(binding = 1) buffer TextureDescriptors 
+{
+  Texture textures[];
+};
+
+layout(binding = 2) buffer TextureData 
+{
+  uint data[];
+};
+
+layout(push_constant) uniform PushConsts {
+  int lods_to_skip;
+  int texture_num;
+} pushConsts;
+
+void main() 
+{
+    const int lods_to_skip = pushConsts.lods_to_skip;
+    const ivec2 buffer_size = textureSize(texture, lods_to_skip);
+
+    const vec2 uv = vec2(gl_GlobalInvocationID.x % buffer_size.x, gl_GlobalInvocationID.x / buffer_size.x) / vec2(buffer_size);
+
+    // Sample and convert to linear space
+    vec4 value = textureLod(texture, uv, lods_to_skip);
+    value.rgb = pow(value, vec4(2.2f)).xyz;
+
+    const uvec4 uvalue  = uvec4(value * 255.0f);
+
+    const uint texture_num = pushConsts.texture_num;
+    const uint data_offset = texture_num == 0 ? 0 : textures[texture_num - 1].data_offset + textures[texture_num - 1].w * textures[texture_num - 1].h;
+
+    textures[texture_num].w = buffer_size.x;
+    textures[texture_num].h = buffer_size.y;
+    textures[texture_num].data_offset = data_offset;
+
+    if (gl_GlobalInvocationID.x < buffer_size.x * buffer_size.y)
+    {
+      data[data_offset + gl_GlobalInvocationID.x] = uvalue.a << 24 | uvalue.b << 16 | uvalue.g << 8 | uvalue.r;
+    }
+}
