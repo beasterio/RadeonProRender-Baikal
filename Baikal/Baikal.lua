@@ -3,11 +3,12 @@ project "Baikal"
     location "../Baikal"
     links {"CLW", "Calc", "FreeImage"}
     files { "../Baikal/**.inl", "../Baikal/**.h", "../Baikal/**.cpp", "../Baikal/**.cl", "../Baikal/**.fsh", "../Baikal/**.vsh" }
-
+    -- excludes {"../Baikal/Vulkan/**.cpp", "../Baikal/Vulkan/**.h"}
+    excludes {"../Baikal/Vulkan/vulkanexamplebase.cpp", "../Baikal/Vulkan/vulkanexamplebase.h", "../Baikal/Vulkan/VulkanDebug.cpp",}
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", 
                 "../3rdparty",
-                "../3rdparty/vulkan",
+                "../3rdparty/VulkanEZ/include",
                 "../3rdparty/glm",
                 "."}
 
@@ -23,11 +24,15 @@ project "Baikal"
     if os.is("windows") then
         includedirs { "../3rdparty/glew/include", "../3rdparty/freeglut/include",
         "../3rdparty/oiio/include", "../3rdparty/glfw/include"}
-        links {"glew", "OpenGL32", "glfw3"}
+        links {"glew", 
+                "OpenGL32", 
+                "glfw3",
+                "VulkanEZ"}
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
+                    "../3rdparty/VulkanEZ/lib",
                     "../3rdparty/glfw/lib/%{cfg.platform}" }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
@@ -139,6 +144,7 @@ project "Baikal"
           'copy "..\\3rdparty\\oiio\\bin\\%{cfg.platform}\\OpenImageIOD.dll" "%{cfg.buildtarget.directory}"',
           'copy "..\\3rdparty\\ProRenderGLTF\\bin\\%{cfg.platform}\\ProRenderGLTF.dll" "%{cfg.buildtarget.directory}"',
           'copy "..\\3rdparty\\RprLoadStore\\bin\\%{cfg.platform}\\RprLoadStore64.dll" "%{cfg.buildtarget.directory}"',
-          'copy "..\\3rdparty\\RprSupport\\bin\\%{cfg.platform}\\RprSupport64.dll" "%{cfg.buildtarget.directory}"'
+          'copy "..\\3rdparty\\RprSupport\\bin\\%{cfg.platform}\\RprSupport64.dll" "%{cfg.buildtarget.directory}"',
+          'copy "..\\3rdparty\\VulkanEZ\\bin\\VulkanEZ.dll" "%{cfg.buildtarget.directory}"'
         }
     end

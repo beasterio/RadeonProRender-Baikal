@@ -1,5 +1,5 @@
 #pragma once
-#include "vulkan/vulkan.h"
+#include "VulkanEZ.h"
 
 #include <math.h>
 #include <stdlib.h>

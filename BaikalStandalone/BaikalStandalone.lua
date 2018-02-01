@@ -1,13 +1,13 @@
 project "BaikalStandalone"
     kind "ConsoleApp"
     location "../BaikalStandalone"
-    links {"Baikal", "RadeonRays", "Calc", "CLW", "vulkan-1"}
+    links {"Baikal", "RadeonRays", "Calc", "CLW"}
     files { "../BaikalStandalone/**.inl", "../BaikalStandalone/**.h", "../BaikalStandalone/**.cpp", "../BaikalStandalone/**.cl", "../BaikalStandalone/**.fsh", "../BaikalStandalone/**.vsh" }
 
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", "../Baikal", 
                 "../3rdparty",
-                "../3rdparty/vulkan",
+                "../3rdparty/VulkanEZ/include",
                 "../3rdparty/glm",
                 "."}
 
@@ -23,13 +23,13 @@ project "BaikalStandalone"
     if os.is("windows") then
         includedirs { "../3rdparty/glew/include", "../3rdparty/freeglut/include",
         "../3rdparty/oiio/include", "../3rdparty/glfw/include"}
-        links {"glew", "OpenGL32", "glfw3"}
+        links {"glew", "OpenGL32", "glfw3", "VulkanEZ"}
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/glfw/lib/%{cfg.platform}",
-                    "../3rdparty/vulkan",
+                    "../3rdparty/VulkanEZ/lib",
                     }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",

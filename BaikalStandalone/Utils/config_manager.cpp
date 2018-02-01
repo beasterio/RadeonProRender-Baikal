@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include "CLW.h"
 #include "RenderFactory/render_factory.h"
 #include "SceneGraph/clwscene.h"
+#include "Vulkan/VulkanDevice.hpp"
 
 #ifndef APP_BENCHMARK
 
@@ -40,9 +41,14 @@ THE SOFTWARE.
 #include <GL/glx.h>
 #endif
 
-#include "Vulkan/VulkanDebug.h"
-#include "Vulkan/VulkanTools.h"
-#include "Vulkan/VulkanDevice.hpp"
+#define VK_CHECK_RESULT(f)																				\
+{																										\
+	VkResult res = (f);																					\
+	if (res != VK_SUCCESS)																				\
+	{																									\
+		assert(res == VK_SUCCESS);																		\
+	}																									\
+}
 
 void ConfigManager::CreateConfigs(
     Mode mode,
@@ -252,7 +258,7 @@ void ConfigManager::CreateConfigs(
     err = configs[0].CreateInstance(enableValidation);
     if (err)
     {
-        throw std::runtime_error("Could not create Vulkan instance : \n" + vks::tools::errorString(err));
+        throw std::runtime_error("Could not create Vulkan instance.\n");
     }
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -260,14 +266,14 @@ void ConfigManager::CreateConfigs(
 #endif
 
     // If requested, we enable the default validation layers for debugging
-    if (enableValidation)
-    {
-        // The report flags determine what type of messages for the layers will be displayed
-        // For validating (debugging) an application the error and warning bits should suffice
-        VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
-        // Additional flags include performance info, loader and layer debug messages, etc.
-        vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
-    }
+    //if (enableValidation)
+    //{
+    //    // The report flags determine what type of messages for the layers will be displayed
+    //    // For validating (debugging) an application the error and warning bits should suffice
+    //    VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+    //    // Additional flags include performance info, loader and layer debug messages, etc.
+    //    vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
+    //}
 
     // Physical device
     uint32_t gpuCount = 0;
@@ -279,7 +285,7 @@ void ConfigManager::CreateConfigs(
     err = vkEnumeratePhysicalDevices(conf.instance, &gpuCount, physicalDevices.data());
     if (err)
     {
-        throw std::runtime_error("Could not enumerate physical devices : \n" + vks::tools::errorString(err));
+        throw std::runtime_error("Could not enumerate physical devices.\n");
     }
 
     // GPU selection
@@ -292,7 +298,6 @@ void ConfigManager::CreateConfigs(
     // Store properties (including limits), features and memory properties of the physical device (so that examples can check against them)
     vkGetPhysicalDeviceProperties(physicalDevice, &conf.device_properties);
     vkGetPhysicalDeviceFeatures(physicalDevice, &conf.device_features);
-    vkGetPhysicalDeviceMemoryProperties(physicalDevice, &conf.device_memory_roperties);
 
     // Derived examples can override this to set actual features (based on above readings) to enable for logical device creation
     conf.GetEnabledFeatures();
@@ -304,7 +309,7 @@ void ConfigManager::CreateConfigs(
     VkResult res = conf.vulkan_device->createLogicalDevice(conf.enabled_features, conf.enabled_extensions);
     if (res != VK_SUCCESS)
     {
-        throw std::runtime_error("Could not create Vulkan device: \n" + vks::tools::errorString(res));
+        throw std::runtime_error("Could not create Vulkan device.\n");
     }
     auto& device = conf.vulkan_device->logicalDevice;
 
@@ -323,16 +328,16 @@ VkResult ConfigManager::VkConfig::CreateInstance(bool enableValidation)
 {
     const char* app_name = "Baikal standalone.";
     VkApplicationInfo appInfo = {};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = app_name;
+    appInfo.applicationVersion = VKEZ_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = app_name;
-    appInfo.apiVersion = VK_API_VERSION_1_0;
+    appInfo.engineVersion = VKEZ_MAKE_VERSION(1, 0, 0);
 
-    std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
+    std::vector<const char*> instanceExtensions = { "VK_KHR_surface" };
 
     // Enable surface extensions depending on os
 #if defined(_WIN32)
-    instanceExtensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    instanceExtensions.push_back("VK_KHR_win32_surface");
 #elif defined(VK_USE_PLATFORM_ANDROID_KHR)
     instanceExtensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
 #elif defined(_DIRECT2DISPLAY)
@@ -348,24 +353,22 @@ VkResult ConfigManager::VkConfig::CreateInstance(bool enableValidation)
 #endif
 
     VkInstanceCreateInfo instanceCreateInfo = {};
-    instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instanceCreateInfo.pNext = NULL;
     instanceCreateInfo.pApplicationInfo = &appInfo;
     if (instanceExtensions.size() > 0)
     {
         if (enableValidation)
         {
-            instanceExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+            instanceExtensions.push_back("VK_EXT_debug_report");
         }
         instanceCreateInfo.enabledExtensionCount = (uint32_t)instanceExtensions.size();
         instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
     }
     if (enableValidation)
     {
-        instanceCreateInfo.enabledLayerCount = vks::debug::validationLayerCount;
-        instanceCreateInfo.ppEnabledLayerNames = vks::debug::validationLayerNames;
+        //instanceCreateInfo.enabledLayerCount = vks::debug::validationLayerCount;
+        //instanceCreateInfo.ppEnabledLayerNames = vks::debug::validationLayerNames;
     }
-    return vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
+    return vkCreateInstance(&instanceCreateInfo, &instance);
 }
 
 void ConfigManager::VkConfig::GetEnabledFeatures()

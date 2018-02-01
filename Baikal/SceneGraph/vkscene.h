@@ -5,7 +5,7 @@
 #include "radeon_rays.h"
 #include "SceneGraph/Collector/collector.h"
 
-#include "vulkan.h"
+#include "VulkanEZ.h"
 
 
 namespace Baikal

@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "RenderFactory/clw_render_factory.h"
 #include "RenderFactory/vk_render_factory.h"
 #include "Renderers/renderer.h"
+#include "VulkanEZ.h"
 #include <vector>
 #include <memory>
 
@@ -85,8 +86,7 @@ public:
         VkPhysicalDeviceProperties device_properties;
         // Stores the features available on the selected physical device (for e.g. checking if a feature is available)
         VkPhysicalDeviceFeatures device_features;
-        // Stores all available memory (type) properties for the physical device
-        VkPhysicalDeviceMemoryProperties device_memory_roperties;
+
         vks::VulkanDevice *vulkan_device;
         VkQueue queue;
 
