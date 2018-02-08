@@ -33,13 +33,18 @@ THE SOFTWARE.
 #define VERTEX_BUFFER_BIND_ID 0
 #include "Output/vkoutput.h"
 #include "radeonrays.h"
+#include "SceneGraph/vkscene.h"
+
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
+
 
 class GPUProfiler;
 
 namespace Baikal
 {
     class VkOutput;
-    struct VkScene;
 
     ///< Renderer implementation
     class VkRenderer : public Renderer<VkScene>
@@ -69,9 +74,18 @@ namespace Baikal
     private:
         void Draw();
         void BuildDeferredCommandBuffer(VkScene const* scene);
-        void RenderScene(VkCommandBuffer cmdBuffer, bool shadow);
-        void PreparePipelines();
+        void RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow);
+        void PreparePipelines(VkScene const* scene);
         VkPipelineShaderStageCreateInfo VkRenderer::LoadShader(std::string fileName, VkShaderStageFlagBits stage);
+        void CreatePipelineCache();
+        void SetupDescriptorSetLayout();
+        void SetupDescriptorSet(VkScene const* scene);
+        void SetupDescriptorPool();
+        void PrepareUniformBuffers(VkScene const* scene);
+
+        void UpdateUniformBuffersScreen();
+        void UpdateUniformBufferDeferredMatrices(VkScene const* scene);
+        void UpdateUniformBufferDeferredLights(VkScene const* scene);
 
         vks::VulkanDevice* m_vulkan_device;
 
@@ -128,6 +142,41 @@ namespace Baikal
             VkPipeline debug;
         } m_pipelines;
 
+        struct {
+            VkPipelineLayout deferred;
+            VkPipelineLayout offscreen;
+            VkPipelineLayout shadow;
+            VkPipelineLayout generateRays;
+            VkPipelineLayout aoResolve;
+            VkPipelineLayout giResolve;
+            VkPipelineLayout bilateralFilter;
+            VkPipelineLayout textureRepack;
+        } m_pipeline_layouts;
+
+        struct {
+            VkDescriptorSetLayout deferred;
+            VkDescriptorSetLayout offscreen;
+            VkDescriptorSetLayout shadow;
+            VkDescriptorSetLayout generateRays;
+            VkDescriptorSetLayout aoResolve;
+            VkDescriptorSetLayout giResolve;
+            VkDescriptorSetLayout bilateralFilter;
+            VkDescriptorSetLayout textureRepack;
+        } m_descriptor_set_layouts;
+
+        struct {
+            VkDescriptorSet deferred;
+            VkDescriptorSet shadow;
+            VkDescriptorSet ao;
+            VkDescriptorSet gi;
+            VkDescriptorSet aoResolve;
+            VkDescriptorSet giResolve;
+            VkDescriptorSet bilateralFilter;
+            VkDescriptorSet bilateralFilterAO;
+            VkDescriptorSet debug;
+            VkDescriptorSet textureRepack;
+        } m_descriptor_sets;
+
         struct
         {
             vks::Buffer raysStaging;
@@ -136,11 +185,65 @@ namespace Baikal
             vks::Buffer hitsLocal;
             vks::Buffer textures;
             vks::Buffer textureData;
-        } buffers;
+        } m_buffers;
 
-        // Depth bias (and slope) are used to avoid shadowing artefacts
+        struct {
+            vks::Buffer vsFullScreen;
+            vks::Buffer vsOffscreen;
+            vks::Buffer fsLights;
+        } m_uniform_buffers;
+
+        struct {
+            glm::mat4 projection;
+            glm::mat4 view;
+            glm::mat4 prevViewProjection;
+            glm::vec4 params;			// x,y - viewport dimensions, w - atan(fov / 2.0f)
+            glm::vec4 cameraPosition;
+        } uboVS, uboOffscreenVS;
+
+        struct {
+            glm::vec4 viewPos;
+            glm::mat4 view;
+            glm::mat4 invView;
+            glm::mat4 invProj;
+            glm::vec4 params;			// x,y - viewport dimensions, w - atan(fov / 2.0f)
+            VkLight lights[LIGHT_COUNT];
+        } uboFragmentLights;
+
+        struct {
+            VkFence transferToHost;
+        } fences;
+
+        VkRenderPass renderPass;
+
+        struct {
+            VkPipelineVertexInputStateCreateInfo inputState;
+            std::vector<VkVertexInputBindingDescription> bindingDescriptions;
+            std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
+        } vertices;
+
+        struct PushConsts
+        {
+            int meshID[4] = { 0 };
+            RadeonRays::float3 baseDiffuse = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
+            RadeonRays::float3 baseRoughness = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
+            RadeonRays::float3 baseMetallic = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
+        };
+
+        struct {
+            vks::Texture2D ao;
+            vks::Texture2D filteredAO;
+            vks::Texture2D gi;
+            vks::Texture2D filteredGI;
+        } textures;
+
+        VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+        VkPipelineCache m_pipeline_cache;
+
+        // Depth bias (and slope) are used to avoid shadowing artifacts
         float m_depth_bias_constant;
         float m_depth_bias_slope;
+        uint32_t m_frame_counter;
 
         rr_instance m_rr_instance;
         GPUProfiler* m_profiler;

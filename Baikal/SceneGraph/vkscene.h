@@ -9,6 +9,7 @@
 #include <vulkan/vulkan.h>
 #include "Vulkan/VulkanTexture.hpp"
 
+#include "Vulkan/camera.hpp"
 
 namespace Baikal
 {
@@ -39,6 +40,9 @@ namespace Baikal
         uint32_t indexCount;
         uint32_t indexBase;
 
+        // Better move to material and share among meshes with same material
+        VkDescriptorSet descriptorSet;
+
         SceneMaterial *material;
     };
 
@@ -56,6 +60,14 @@ namespace Baikal
         glm::vec3 pos; float pad;
         glm::vec3 normal; float pad0;
         glm::vec2 uv; float pad1[2];
+    };
+    
+    struct VkLight
+    {
+        glm::vec4 position;
+        glm::vec4 target;
+        glm::vec4 color;
+        glm::mat4 viewMatrix;
     };
 
     struct VkScene
@@ -84,6 +96,11 @@ namespace Baikal
         std::vector<Vertex> vertices;
         std::vector<RaytraceVertex> raytrace_vertices;
         std::vector<uint32_t> indices;
+
+        VkPipelineLayout pipelineLayout;
+
         uint32_t index_base = 0;
+
+        VkCamera camera;
     };
 }
