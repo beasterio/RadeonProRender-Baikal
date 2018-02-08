@@ -26,8 +26,12 @@ namespace Baikal
         switch (type)
         {
             case RendererType::kUnidirectionalPathTracer:
-                return std::unique_ptr<Renderer<VkScene>>(
-                    new VkRenderer(m_device, m_instance));
+            {
+                VkRenderer* renderer = new VkRenderer(m_device, m_instance);
+                m_offscreen_buffer = renderer->GetOffscreenBuffer();
+
+                return std::unique_ptr<Renderer<VkScene>>(renderer);
+            }
             default:
                 throw std::runtime_error("Renderer not supported");
         }
@@ -58,6 +62,6 @@ namespace Baikal
 
     std::unique_ptr<SceneController<VkScene>> VkRenderFactory::CreateSceneController() const
     {
-        return std::make_unique<VkSceneController>(m_device, m_instance);
+        return std::make_unique<VkSceneController>(m_device, m_instance, m_offscreen_buffer);
     }
 }

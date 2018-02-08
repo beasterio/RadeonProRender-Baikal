@@ -70,6 +70,7 @@ namespace Baikal
         void SetRandomSeed(std::uint32_t seed) override;
        
         rr_instance GetRRInstance() const { return m_rr_instance; }
+        vks::Buffer* GetOffscreenBuffer() { return &m_uniform_buffers.vsOffscreen; }
     protected:
     private:
         void Draw();
@@ -221,14 +222,6 @@ namespace Baikal
             std::vector<VkVertexInputBindingDescription> bindingDescriptions;
             std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
         } vertices;
-
-        struct PushConsts
-        {
-            int meshID[4] = { 0 };
-            RadeonRays::float3 baseDiffuse = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
-            RadeonRays::float3 baseRoughness = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
-            RadeonRays::float3 baseMetallic = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
-        };
 
         struct {
             vks::Texture2D ao;

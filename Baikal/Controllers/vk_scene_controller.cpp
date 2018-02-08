@@ -22,10 +22,32 @@ namespace Baikal
     {
         return (value + 0xF) / 0x10 * 0x10;
     }
+
+    uint32_t GetMemTypeIndex(VkPhysicalDevice physicalDevice, uint32_t typeBits, VkFlags properties)
+    {
+        VkPhysicalDeviceMemoryProperties deviceMemProps;
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &deviceMemProps);
+
+        for (uint32_t i = 0; i < 32; i++)
+        {
+            if ((typeBits & 1) == 1)
+            {
+                if ((deviceMemProps.memoryTypes[i].propertyFlags & properties) == properties)
+                {
+                    return i;
+                }
+            }
+            typeBits >>= 1;
+        }
+
+        // todo: throw if no appropriate mem type was found
+        return 0;
+    }
      
-    VkSceneController::VkSceneController(vks::VulkanDevice* device, rr_instance& instance)
+    VkSceneController::VkSceneController(vks::VulkanDevice* device, rr_instance& instance, vks::Buffer* defaultUBO)
         : m_instance(instance)
         , m_vulkan_device(device)
+        , m_defaultUBO(defaultUBO)
     {
     }
 
@@ -118,26 +140,26 @@ namespace Baikal
 
             rr_shape rrmesh = nullptr;
 
-            //auto status = rrCreateTriangleMesh(
-            //    m_instance,
-            //    &meshPositions[0].x,
-            //    (std::uint32_t)meshPositions.size(),
-            //    sizeof(RadeonRays::float3),
-            //    (std::uint32_t*)(&meshIndices[0]),
-            //    (std::uint32_t)sizeof(uint32_t),
-            //    (std::uint32_t)(meshIndices.size() / 3),
-            //    i,
-            //    &rrmesh);
+            auto status = rrCreateTriangleMesh(
+                m_instance,
+                &meshPositions[0].x,
+                (std::uint32_t)meshPositions.size(),
+                sizeof(RadeonRays::float3),
+                (std::uint32_t*)(&meshIndices[0]),
+                (std::uint32_t)sizeof(uint32_t),
+                (std::uint32_t)(meshIndices.size() / 3),
+                i,
+                &rrmesh);
 
-            //rrAttachShape(m_instance, rrmesh);
+            rrAttachShape(m_instance, rrmesh);
         }
 
         auto& device = m_vulkan_device->logicalDevice;
         VkQueue graphics_queue;
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
-        VkCommandBuffer copy_cmd = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, graphics_queue, false);
+        VkCommandBuffer copy_cmd = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
         AllocateOnGPU(scene, copy_cmd, out);
-        vkFreeCommandBuffers(device, 1, &copy_cmd);
+        vkFreeCommandBuffers(device, m_vulkan_device->commandPool, 1, &copy_cmd);
 
     }
 
@@ -222,8 +244,8 @@ namespace Baikal
     void VkSceneController::AllocateOnGPU(Scene1 const& scene, VkCommandBuffer copy_cmd, VkScene& out) const
     {
         auto& device = m_vulkan_device->logicalDevice;
-        VkQueue graphics_queue;
-        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
+        VkQueue queue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
 
         size_t vertexDataSize = out.vertices.size() * sizeof(Vertex);
         size_t indexDataSize = out.indices.size() * sizeof(uint32_t);
@@ -231,26 +253,35 @@ namespace Baikal
         auto materialBufferSize = static_cast<uint32_t>(out.raytrace_materials.size() * sizeof(Raytrace::Material));
         auto raytraceVertexDataSize = out.vertices.size() * sizeof(Vertex);
 
+        VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+        VkMemoryRequirements memReqs;
+
         void *data;
 
         struct
         {
             struct {
+                VkDeviceMemory memory;
                 VkBuffer buffer;
             } vBuffer;
             struct {
+                VkDeviceMemory memory;
                 VkBuffer buffer;
             } iBuffer;
             struct {
+                VkDeviceMemory memory;
                 VkBuffer buffer;
             } raytraceShapeBuffer;
             struct {
+                VkDeviceMemory memory;
                 VkBuffer buffer;
             } raytraceMaterialBuffer;
             struct {
+                VkDeviceMemory memory;
                 VkBuffer buffer;
             } raytraceRNGBuffer;
             struct {
+                VkDeviceMemory memory;
                 VkBuffer buffer;
             } raytraceVertexBuffer;
         } staging;
@@ -260,108 +291,100 @@ namespace Baikal
 
         // Staging buffer
         vBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, vertexDataSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &vBufferInfo, &staging.vBuffer.buffer));
-        //vkGetBufferMemoryRequirements(device, staging.vBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.vBuffer.memory));
-        //VK_CHECK_RESULT(vkMapMemory(device, staging.vBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        VK_CHECK_RESULT(vkMapBuffer(device, staging.vBuffer.buffer, 0, VK_WHOLE_SIZE, &data));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &vBufferInfo, nullptr, &staging.vBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.vBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.vBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.vBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
         memcpy(data, out.vertices.data(), vertexDataSize);
-        vkUnmapBuffer(device, staging.vBuffer.buffer);
-        //vkUnmapMemory(device, staging.vBuffer.memory);
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.vBuffer.buffer, staging.vBuffer.memory, 0));
+        vkUnmapMemory(device, staging.vBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.vBuffer.buffer, staging.vBuffer.memory, 0));
 
         // Target
         vBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, vertexDataSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &vBufferInfo, &out.vertex_buffer.buffer));
-        //vkGetBufferMemoryRequirements(device, vertexBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &vertexBuffer.memory));
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, vertexBuffer.buffer, vertexBuffer.memory, 0));
-        out.vertex_buffer.size = vertexDataSize;
+        VK_CHECK_RESULT(vkCreateBuffer(device, &vBufferInfo, nullptr, &out.vertex_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.vertex_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.vertex_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.vertex_buffer.buffer, out.vertex_buffer.memory, 0));
+        out.vertex_buffer.size = memReqs.size;
 
         // Generate index buffer
         VkBufferCreateInfo iBufferInfo;
 
         // Staging buffer
         iBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, indexDataSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &iBufferInfo, &staging.iBuffer.buffer));
-        //vkGetBufferMemoryRequirements(device, staging.iBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.iBuffer.memory));
-        //VK_CHECK_RESULT(vkMapMemory(device, staging.iBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        VK_CHECK_RESULT(vkMapBuffer(device, staging.iBuffer.buffer, 0, VK_WHOLE_SIZE, &data));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &iBufferInfo, nullptr, &staging.iBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.iBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.iBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.iBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
         memcpy(data, out.indices.data(), indexDataSize);
-        vkUnmapBuffer(device, staging.iBuffer.buffer);
-        //vkUnmapMemory(device, staging.iBuffer.memory);
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.iBuffer.buffer, staging.iBuffer.memory, 0));
+        vkUnmapMemory(device, staging.iBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.iBuffer.buffer, staging.iBuffer.memory, 0));
 
         // Target
         iBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, indexDataSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &iBufferInfo, &out.index_buffer.buffer));
-        //vkGetBufferMemoryRequirements(device, indexBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &indexBuffer.memory));
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, indexBuffer.buffer, indexBuffer.memory, 0));
-        out.index_buffer.size = indexDataSize;
+        VK_CHECK_RESULT(vkCreateBuffer(device, &iBufferInfo, nullptr, &out.index_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.index_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.index_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.index_buffer.buffer, out.index_buffer.memory, 0));
+        out.index_buffer.size = memReqs.size;
 
         // Generate raytrace shape buffer
         VkBufferCreateInfo raytraceShapeBufferInfo;
 
         // Staging buffer
         raytraceShapeBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, shapeBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceShapeBufferInfo, &staging.raytraceShapeBuffer.buffer));
-        //vkGetBufferMemoryRequirements(device, staging.raytraceShapeBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceShapeBuffer.memory));
-        //VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceShapeBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        VK_CHECK_RESULT(vkMapBuffer(device, staging.raytraceShapeBuffer.buffer, 0, VK_WHOLE_SIZE, &data));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceShapeBufferInfo, nullptr, &staging.raytraceShapeBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.raytraceShapeBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceShapeBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceShapeBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
         memcpy(data, out.raytrace_shapes.data(), shapeBufferSize);
-        vkUnmapBuffer(device, staging.raytraceShapeBuffer.buffer);
-        //vkUnmapMemory(device, staging.raytraceShapeBuffer.memory);
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceShapeBuffer.buffer, staging.raytraceShapeBuffer.memory, 0));
+        vkUnmapMemory(device, staging.raytraceShapeBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceShapeBuffer.buffer, staging.raytraceShapeBuffer.memory, 0));
 
         // Target
         raytraceShapeBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, shapeBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceShapeBufferInfo, &out.raytrace_shape_buffer.buffer));
-        //vkGetBufferMemoryRequirements(device, raytraceShapeBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &raytraceShapeBuffer.memory));
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, raytraceShapeBuffer.buffer, raytraceShapeBuffer.memory, 0));
-        out.raytrace_shape_buffer.size = shapeBufferSize;
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceShapeBufferInfo, nullptr, &out.raytrace_shape_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.raytrace_shape_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_shape_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_shape_buffer.buffer, out.raytrace_shape_buffer.memory, 0));
+        out.raytrace_shape_buffer.size = memReqs.size;
 
         // Generate raytrace shape buffer
         VkBufferCreateInfo raytraceMaterialBufferInfo;
 
         // Staging buffer
         raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, materialBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU,&raytraceMaterialBufferInfo, &staging.raytraceMaterialBuffer.buffer));
-        //vkGetBufferMemoryRequirements(device, staging.raytraceMaterialBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceMaterialBuffer.memory));
-        //VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceMaterialBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        VK_CHECK_RESULT(vkMapBuffer(device, staging.raytraceMaterialBuffer.buffer, 0, VK_WHOLE_SIZE, &data));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &staging.raytraceMaterialBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.raytraceMaterialBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceMaterialBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceMaterialBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
         memcpy(data, out.raytrace_materials.data(), materialBufferSize);
-        vkUnmapBuffer(device, staging.raytraceMaterialBuffer.buffer);
-        //vkUnmapMemory(device, staging.raytraceMaterialBuffer.memory);
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceMaterialBuffer.buffer, staging.raytraceMaterialBuffer.memory, 0));
+        vkUnmapMemory(device, staging.raytraceMaterialBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceMaterialBuffer.buffer, staging.raytraceMaterialBuffer.memory, 0));
 
         // Target
         raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, materialBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceMaterialBufferInfo, &out.raytrace_material_buffer.buffer));
-        //vkGetBufferMemoryRequirements(device, raytraceMaterialBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &raytraceMaterialBuffer.memory));
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, raytraceMaterialBuffer.buffer, raytraceMaterialBuffer.memory, 0));
-        out.raytrace_material_buffer.size = materialBufferSize;
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &out.raytrace_material_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.raytrace_material_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_material_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_material_buffer.buffer, out.raytrace_material_buffer.memory, 0));
+        out.raytrace_material_buffer.size = memReqs.size;
 
 
         // Generate raytrace shape buffer
@@ -369,14 +392,13 @@ namespace Baikal
 
         // Staging buffer
         raytraceRNGBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, kRNGBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceRNGBufferInfo, &staging.raytraceRNGBuffer.buffer));
-        //vkGetBufferMemoryRequirements(device, staging.raytraceRNGBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceRNGBuffer.memory));
-        //VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceRNGBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        VK_CHECK_RESULT(vkMapBuffer(device, staging.raytraceRNGBuffer.buffer, 0, VK_WHOLE_SIZE, &data));
-        out.raytrace_RNG_buffer.size = kRNGBufferSize;
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceRNGBufferInfo, nullptr, &staging.raytraceRNGBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.raytraceRNGBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceRNGBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceRNGBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+        out.raytrace_RNG_buffer.size = memReqs.size;
 
         // Generate random data into the buffer
         {
@@ -387,47 +409,43 @@ namespace Baikal
             std::generate(iter, iter + kRNGBufferSize / sizeof(uint32_t), [&distribution, &rng] { return distribution(rng); });
         }
 
-        vkUnmapBuffer(device, staging.raytraceRNGBuffer.buffer);
-        //vkUnmapMemory(device, staging.raytraceRNGBuffer.memory);
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceRNGBuffer.buffer, staging.raytraceRNGBuffer.memory, 0));
+        vkUnmapMemory(device, staging.raytraceRNGBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceRNGBuffer.buffer, staging.raytraceRNGBuffer.memory, 0));
 
         // Target
         raytraceRNGBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, kRNGBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceRNGBufferInfo, &out.raytrace_RNG_buffer.buffer));
-        //vkGetBufferMemoryRequirements(device, raytraceRNGBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &raytraceRNGBuffer.memory));
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, raytraceRNGBuffer.buffer, raytraceRNGBuffer.memory, 0));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceRNGBufferInfo, nullptr, &out.raytrace_RNG_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.raytrace_RNG_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_RNG_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_RNG_buffer.buffer, out.raytrace_RNG_buffer.memory, 0));
 
         // Staging buffer
         auto raytraceVertexBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, raytraceVertexDataSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceVertexBufferInfo, &staging.raytraceVertexBuffer.buffer));
-        //vkGetBufferMemoryRequirements(device, staging.raytraceVertexBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceVertexBuffer.memory));
-        //VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceVertexBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        VK_CHECK_RESULT(vkMapBuffer(device, staging.raytraceVertexBuffer.buffer, 0, VK_WHOLE_SIZE, &data));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceVertexBufferInfo, nullptr, &staging.raytraceVertexBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.raytraceVertexBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceVertexBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceVertexBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
         memcpy(data, out.raytrace_vertices.data(), raytraceVertexDataSize);
-        vkUnmapBuffer(device, staging.raytraceVertexBuffer.buffer);
-        //vkUnmapMemory(device, staging.raytraceVertexBuffer.memory);
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceVertexBuffer.buffer, staging.raytraceVertexBuffer.memory, 0));
+        vkUnmapMemory(device, staging.raytraceVertexBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceVertexBuffer.buffer, staging.raytraceVertexBuffer.memory, 0));
 
         // Target
         raytraceVertexBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, raytraceVertexDataSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, VK_MEMORY_CPU_TO_GPU, &raytraceVertexBufferInfo, &out.raytrace_vertex_buffer.buffer));
-        //vkGetBufferMemoryRequirements(device, raytraceVertexBuffer.buffer, &memReqs);
-        //memAlloc.allocationSize = memReqs.size;
-        //memAlloc.memoryTypeIndex = getMemTypeIndex(memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &raytraceVertexBuffer.memory));
-        //VK_CHECK_RESULT(vkBindBufferMemory(device, raytraceVertexBuffer.buffer, raytraceVertexBuffer.memory, 0));
-        out.raytrace_vertex_buffer.size = raytraceVertexDataSize;
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceVertexBufferInfo, nullptr, &out.raytrace_vertex_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.raytrace_vertex_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_vertex_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_vertex_buffer.buffer, out.raytrace_vertex_buffer.memory, 0));
+        out.raytrace_vertex_buffer.size = memReqs.size;
 
         // Copy
-        //VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-        VkCommandBufferUsageFlags flag = 0x0;
-        VK_CHECK_RESULT(vkBeginCommandBuffer(copy_cmd, flag));
+        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        VK_CHECK_RESULT(vkBeginCommandBuffer(copy_cmd, &cmdBufInfo));
 
         VkBufferCopy copyRegion = {};
 
@@ -482,133 +500,138 @@ namespace Baikal
         VK_CHECK_RESULT(vkEndCommandBuffer(copy_cmd));
 
         VkSubmitInfo submitInfo = {};
-        //submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &copy_cmd;
 
-        VK_CHECK_RESULT(vkQueueSubmit(graphics_queue, 1, &submitInfo, VK_NULL_HANDLE));
-        VK_CHECK_RESULT(vkQueueWaitIdle(graphics_queue));
+        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+        VK_CHECK_RESULT(vkQueueWaitIdle(queue));
 
-        vkDestroyBuffer(device, staging.vBuffer.buffer);
-        vkDestroyBuffer(device, staging.iBuffer.buffer);
-        vkDestroyBuffer(device, staging.raytraceShapeBuffer.buffer);
-        vkDestroyBuffer(device, staging.raytraceMaterialBuffer.buffer);
-        vkDestroyBuffer(device, staging.raytraceRNGBuffer.buffer);
+        vkDestroyBuffer(device, staging.vBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.vBuffer.memory, nullptr);
+        vkDestroyBuffer(device, staging.iBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.iBuffer.memory, nullptr);
+        vkDestroyBuffer(device, staging.raytraceShapeBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.raytraceShapeBuffer.memory, nullptr);
+        vkDestroyBuffer(device, staging.raytraceMaterialBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.raytraceMaterialBuffer.memory, nullptr);
+        vkDestroyBuffer(device, staging.raytraceRNGBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.raytraceRNGBuffer.memory, nullptr);
 
         // Generate descriptor sets for all meshes
         // todo : think about a nicer solution, better suited per material?
 
         // Decriptor pool
-        //std::vector<VkDescriptorPoolSize> poolSizes;
-        //poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(meshes.size())));
-        //poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(meshes.size() * 4)));
-        //poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(10)));
+        std::vector<VkDescriptorPoolSize> poolSizes;
+        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(out.meshes.size())));
+        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(out.meshes.size() * 4)));
+        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(10)));
 
-        //VkDescriptorPoolCreateInfo descriptorPoolInfo =
-        //    vks::initializers::descriptorPoolCreateInfo(
-        //        static_cast<uint32_t>(poolSizes.size()),
-        //        poolSizes.data(),
-        //        static_cast<uint32_t>(meshes.size()));
+        VkDescriptorPoolCreateInfo descriptorPoolInfo =
+            vks::initializers::descriptorPoolCreateInfo(
+                static_cast<uint32_t>(poolSizes.size()),
+                poolSizes.data(),
+                static_cast<uint32_t>(out.meshes.size()));
 
-        //VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
+        VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &out.descriptorPool));
 
         // Shared descriptor set layout
-        //std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
-        //// Binding 0: UBO
-        //setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-        //    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        //    VK_SHADER_STAGE_VERTEX_BIT,
-        //    0));
-        //// Binding 1: Diffuse map
-        //setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-        //    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //    VK_SHADER_STAGE_FRAGMENT_BIT,
-        //    1));
-        //// Binding 2: Roughness map
-        //setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-        //    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //    VK_SHADER_STAGE_FRAGMENT_BIT,
-        //    2));
-        //// Binding 3: Bump map
-        //setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-        //    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //    VK_SHADER_STAGE_FRAGMENT_BIT,
-        //    3));
-        //// Binding 4: Metallic map
-        //setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-        //    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //    VK_SHADER_STAGE_FRAGMENT_BIT,
-        //    4));
+        std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
+        // Binding 0: UBO
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0));
+        // Binding 1: Diffuse map
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            1));
+        // Binding 2: Roughness map
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            2));
+        // Binding 3: Bump map
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            3));
+        // Binding 4: Metallic map
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            4));
 
-        //VkDescriptorSetLayoutCreateInfo descriptorLayout =
-        //    vks::initializers::descriptorSetLayoutCreateInfo(
-        //        setLayoutBindings.data(),
-        //        static_cast<uint32_t>(setLayoutBindings.size()));
+        VkDescriptorSetLayoutCreateInfo descriptorLayout =
+            vks::initializers::descriptorSetLayoutCreateInfo(
+                setLayoutBindings.data(),
+                static_cast<uint32_t>(setLayoutBindings.size()));
 
-        //VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &descriptorSetLayout));
+        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &out.descriptorSetLayout));
 
-        //VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-        //    vks::initializers::pipelineLayoutCreateInfo(
-        //        &descriptorSetLayout,
-        //        1);
+        VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+            vks::initializers::pipelineLayoutCreateInfo(
+                &out.descriptorSetLayout,
+                1);
 
-        //VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(pushConsts), 0);
-        //pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-        //pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+        VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PushConsts), 0);
+        pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+        pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 
-        //VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &pipelineLayout));
+        VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &out.pipelineLayout));
 
         // Descriptor sets
-        //for (uint32_t i = 0; i < meshes.size(); i++)
-        //{
-        //    // Descriptor set
-        //    VkDescriptorSetAllocateInfo allocInfo =
-        //        vks::initializers::descriptorSetAllocateInfo(
-        //            descriptorPool,
-        //            &descriptorSetLayout,
-        //            1);
+        for (uint32_t i = 0; i < out.meshes.size(); i++)
+        {
+            // Descriptor set
+            VkDescriptorSetAllocateInfo allocInfo =
+                vks::initializers::descriptorSetAllocateInfo(
+                    out.descriptorPool,
+                    &out.descriptorSetLayout,
+                    1);
 
-        //    // Background
+            // Background
 
-        //    VkResult r = vkAllocateDescriptorSets(device, &allocInfo, &meshes[i].descriptorSet);
+            VkResult r = vkAllocateDescriptorSets(device, &allocInfo, &out.meshes[i].descriptorSet);
 
-        //    VK_CHECK_RESULT(r);
+            VK_CHECK_RESULT(r);
 
-        //    std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+            std::vector<VkWriteDescriptorSet> writeDescriptorSets;
 
-        //    // Binding 0 : Vertex shader uniform buffer
-        //    writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-        //        meshes[i].descriptorSet,
-        //        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        //        0,
-        //        &defaultUBO->descriptor));
-        //    // Image bindings
-        //    // Binding 0: Color map
-        //    writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-        //        meshes[i].descriptorSet,
-        //        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //        1,
-        //        &meshes[i].material->diffuse.descriptor));
-        //    // Binding 1: Roughness
-        //    writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-        //        meshes[i].descriptorSet,
-        //        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //        2,
-        //        &meshes[i].material->roughness.descriptor));
-        //    // Binding 2: Normal
-        //    writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-        //        meshes[i].descriptorSet,
-        //        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //        3,
-        //        &meshes[i].material->bump.descriptor));
-        //    // Binding 3: Metallic
-        //    writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-        //        meshes[i].descriptorSet,
-        //        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        //        4,
-        //        &meshes[i].material->metallic.descriptor));
+            // Binding 0 : Vertex shader uniform buffer
+            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
+                out.meshes[i].descriptorSet,
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                0,
+                &m_defaultUBO->descriptor));
+            // Image bindings
+            // Binding 0: Color map
+            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
+                out.meshes[i].descriptorSet,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                1,
+                &out.meshes[i].material->diffuse.descriptor));
+            // Binding 1: Roughness
+            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
+                out.meshes[i].descriptorSet,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                2,
+                &out.meshes[i].material->roughness.descriptor));
+            // Binding 2: Normal
+            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
+                out.meshes[i].descriptorSet,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                3,
+                &out.meshes[i].material->bump.descriptor));
+            // Binding 3: Metallic
+            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
+                out.meshes[i].descriptorSet,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                4,
+                &out.meshes[i].material->metallic.descriptor));
 
-        //    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-        //}
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+        }
     }
 }

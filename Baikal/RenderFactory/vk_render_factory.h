@@ -60,5 +60,6 @@ namespace Baikal
     private:
         vks::VulkanDevice* m_device;
         mutable rr_instance m_instance;
+        mutable vks::Buffer* m_offscreen_buffer;
     };
 }

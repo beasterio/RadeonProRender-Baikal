@@ -70,6 +70,14 @@ namespace Baikal
         glm::mat4 viewMatrix;
     };
 
+    struct PushConsts
+    {
+        int meshID[4] = { 0 };
+        RadeonRays::float3 baseDiffuse = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
+        RadeonRays::float3 baseRoughness = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
+        RadeonRays::float3 baseMetallic = RadeonRays::float3(-1.0f, -1.0f, -1.0f, 1.0f);
+    };
+
     struct VkScene
     {
 
@@ -98,6 +106,8 @@ namespace Baikal
         std::vector<uint32_t> indices;
 
         VkPipelineLayout pipelineLayout;
+        VkDescriptorPool descriptorPool;
+        VkDescriptorSetLayout descriptorSetLayout;
 
         uint32_t index_base = 0;
 
