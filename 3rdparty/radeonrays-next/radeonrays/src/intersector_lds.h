@@ -182,7 +182,7 @@ namespace RadeonRays {
             .createPipelineLayout(pipeline_layout_create_info);
 
         // Load intersection shader module
-        std::string path = "../external/radeonrays-next/shaders/";
+        std::string path = "../3rdparty/radeonrays-next/shaders/";
         path.append(BVHTraits::GetGPUTraversalFileName());
         shader_ = LoadShaderModule(device_, path);
 
