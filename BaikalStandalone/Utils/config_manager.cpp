@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include "RenderFactory/render_factory.h"
 #include "SceneGraph/clwscene.h"
 #include "Vulkan/VulkanDevice.hpp"
+#include "Vulkan/VulkanDebug.h"
 
 #ifndef APP_BENCHMARK
 
@@ -268,11 +269,11 @@ void ConfigManager::CreateConfigs(
     // If requested, we enable the default validation layers for debugging
     if (enableValidation)
     {
-        //// The report flags determine what type of messages for the layers will be displayed
-        //// For validating (debugging) an application the error and warning bits should suffice
-        //VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
-        //// Additional flags include performance info, loader and layer debug messages, etc.
-        //vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
+        // The report flags determine what type of messages for the layers will be displayed
+        // For validating (debugging) an application the error and warning bits should suffice
+        VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+        // Additional flags include performance info, loader and layer debug messages, etc.
+        vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
     }
 
     // Physical device
@@ -327,17 +328,22 @@ void ConfigManager::CreateConfigs(
 VkResult ConfigManager::VkConfig::CreateInstance(bool enableValidation)
 {
     const char* app_name = "Baikal standalone.";
-    VkApplicationInfo appInfo = {};
-    appInfo.pApplicationName = app_name;
-    appInfo.applicationVersion = VKEZ_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = app_name;
-    appInfo.engineVersion = VKEZ_MAKE_VERSION(1, 0, 0);
+    // Validation can also be forced via a define
+#if defined(_VALIDATION)
+    this->settings.validation = true;
+#endif	
 
-    std::vector<const char*> instanceExtensions = { "VK_KHR_surface" };
+    VkApplicationInfo appInfo = {};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = app_name;
+    appInfo.pEngineName = app_name;
+    appInfo.apiVersion = VK_API_VERSION_1_0;
+
+    std::vector<const char*> instanceExtensions = { VK_KHR_SURFACE_EXTENSION_NAME };
 
     // Enable surface extensions depending on os
 #if defined(_WIN32)
-    instanceExtensions.push_back("VK_KHR_win32_surface");
+    instanceExtensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
 #elif defined(VK_USE_PLATFORM_ANDROID_KHR)
     instanceExtensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
 #elif defined(_DIRECT2DISPLAY)
@@ -353,48 +359,46 @@ VkResult ConfigManager::VkConfig::CreateInstance(bool enableValidation)
 #endif
 
     VkInstanceCreateInfo instanceCreateInfo = {};
+    instanceCreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instanceCreateInfo.pNext = NULL;
     instanceCreateInfo.pApplicationInfo = &appInfo;
     if (instanceExtensions.size() > 0)
     {
         if (enableValidation)
         {
-            instanceExtensions.push_back("VK_EXT_debug_report");
+            instanceExtensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
         }
         instanceCreateInfo.enabledExtensionCount = (uint32_t)instanceExtensions.size();
         instanceCreateInfo.ppEnabledExtensionNames = instanceExtensions.data();
     }
     if (enableValidation)
     {
-        const char *validationLayerNames[] = {
-            "VK_LAYER_LUNARG_standard_validation"
-        };
-
-        instanceCreateInfo.enabledLayerCount = 1;
-        instanceCreateInfo.ppEnabledLayerNames = validationLayerNames;
+        instanceCreateInfo.enabledLayerCount = vks::debug::validationLayerCount;
+        instanceCreateInfo.ppEnabledLayerNames = vks::debug::validationLayerNames;
     }
-    return vkCreateInstance(&instanceCreateInfo, &instance);
+    return vkCreateInstance(&instanceCreateInfo, nullptr, &instance);
 }
 
 void ConfigManager::VkConfig::GetEnabledFeatures()
 {
-    enabled_features = device_features;
-    //// Enable anisotropic filtering if supported
-    //if (device_features.samplerAnisotropy) {
-    //    enabled_features.samplerAnisotropy = VK_TRUE;
-    //}
-    //// Enable texture compression  
-    //if (device_features.textureCompressionBC) {
-    //    enabled_features.textureCompressionBC = VK_TRUE;
-    //}
-    //else if (device_features.textureCompressionASTC_LDR) {
-    //    enabled_features.textureCompressionASTC_LDR = VK_TRUE;
-    //}
-    //else if (device_features.textureCompressionETC2) {
-    //    enabled_features.textureCompressionETC2 = VK_TRUE;
-    //}
+    //enabled_features = device_features;
+    // Enable anisotropic filtering if supported
+    if (device_features.samplerAnisotropy) {
+        enabled_features.samplerAnisotropy = VK_TRUE;
+    }
+    // Enable texture compression  
+    if (device_features.textureCompressionBC) {
+        enabled_features.textureCompressionBC = VK_TRUE;
+    }
+    else if (device_features.textureCompressionASTC_LDR) {
+        enabled_features.textureCompressionASTC_LDR = VK_TRUE;
+    }
+    else if (device_features.textureCompressionETC2) {
+        enabled_features.textureCompressionETC2 = VK_TRUE;
+    }
 
-    //if (device_features.shaderStorageImageExtendedFormats)
-    //{
-    //    enabled_features.shaderStorageImageExtendedFormats = VK_TRUE;
-    //}
+    if (device_features.shaderStorageImageExtendedFormats)
+    {
+        enabled_features.shaderStorageImageExtendedFormats = VK_TRUE;
+    }
 }

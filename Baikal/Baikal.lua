@@ -6,8 +6,9 @@ project "Baikal"
             "../3rdparty/radeonrays-next/radeonrays/**.h", 
             "../3rdparty/radeonrays-next/radeonrays/**.cpp",
              }
-    -- excludes {"../Baikal/Vulkan/**.cpp", "../Baikal/Vulkan/**.h"}
-    excludes {"../Baikal/Vulkan/vulkanexamplebase.cpp", "../Baikal/Vulkan/vulkanexamplebase.h", "../Baikal/Vulkan/VulkanDebug.cpp",}
+    excludes {"../Baikal/Vulkan/vulkanexamplebase.cpp", 
+            -- "../Baikal/Vulkan/vulkanexamplebase.h", "../Baikal/Vulkan/VulkanDebug.cpp",
+            }
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", 
                 "../3rdparty",

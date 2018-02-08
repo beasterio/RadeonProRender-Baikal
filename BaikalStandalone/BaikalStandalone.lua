@@ -7,7 +7,6 @@ project "BaikalStandalone"
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", "../Baikal", 
                 "../3rdparty",
-                "../3rdparty/VulkanEZ/include",
                 "../3rdparty/radeonrays-next/radeonrays/inc",
                 "../3rdparty/glm",
                 "../3rdparty/gli",
@@ -25,13 +24,13 @@ project "BaikalStandalone"
     if os.is("windows") then
         includedirs { "../3rdparty/glew/include", "../3rdparty/freeglut/include",
         "../3rdparty/oiio/include", "../3rdparty/glfw/include"}
-        links {"glew", "OpenGL32", "glfw3", "VulkanEZ"}
+        links {"glew", "OpenGL32", "glfw3", "vulkan-1"}
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/glfw/lib/%{cfg.platform}",
-                    "../3rdparty/VulkanEZ/lib",
+                    "../3rdparty/vulkan/lib/",
                     }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",

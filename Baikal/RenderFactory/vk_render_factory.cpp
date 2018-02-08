@@ -11,12 +11,12 @@ namespace Baikal
     VkRenderFactory::VkRenderFactory(vks::VulkanDevice* device)
         : m_device(device)
     {
-        //rrInitInstance(m_device->logicalDevice, m_device->physicalDevice, vulkanDevice->computeCommandPool, &m_instance);
+        rrInitInstance(m_device->logicalDevice, m_device->physicalDevice, m_device->computeCommandPool, &m_instance);
     }
 
     VkRenderFactory::~VkRenderFactory()
     {
-        //rrShutdownInstance(m_instance);
+        rrShutdownInstance(m_instance);
     }
 
     // Create a renderer of specified type
