@@ -2,14 +2,19 @@ project "Baikal"
     kind "StaticLib"
     location "../Baikal"
     links {"CLW", "Calc", "FreeImage"}
-    files { "../Baikal/**.inl", "../Baikal/**.h", "../Baikal/**.cpp", "../Baikal/**.cl", "../Baikal/**.fsh", "../Baikal/**.vsh" }
+    files { "../Baikal/**.inl", "../Baikal/**.h", "../Baikal/**.cpp", "../Baikal/**.cl", "../Baikal/**.fsh", "../Baikal/**.vsh", "../Baikal/**.hpp",
+            "../3rdparty/radeonrays-next/radeonrays/**.h", 
+            "../3rdparty/radeonrays-next/radeonrays/**.cpp",
+             }
     -- excludes {"../Baikal/Vulkan/**.cpp", "../Baikal/Vulkan/**.h"}
     excludes {"../Baikal/Vulkan/vulkanexamplebase.cpp", "../Baikal/Vulkan/vulkanexamplebase.h", "../Baikal/Vulkan/VulkanDebug.cpp",}
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", 
                 "../3rdparty",
-                "../3rdparty/VulkanEZ/include",
+                "../3rdparty/radeonrays-next/radeonrays/inc",
+                "../3rdparty/radeonrays-next/radeonrays/src",
                 "../3rdparty/glm",
+                "../3rdparty/gli",
                 "."}
 
     if os.is("macosx") then

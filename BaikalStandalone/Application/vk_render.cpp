@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include "vk_render.h"
 #include "SceneGraph/IO/scene_io.h"
 #include "SceneGraph/IO/material_io.h"
+#include "Output/vkoutput.h"
 
 namespace Baikal
 {
@@ -42,6 +43,9 @@ namespace Baikal
             settings.platform_index,
             settings.device_index);
 
+        m_output = m_cfgs[m_primary].factory->CreateOutput(settings.width, settings.height);
+        m_output_type = OutputType::kColor;
+        SetOutputType(OutputType::kColor);
     }
 
     //copy data from Vk to GL
@@ -99,8 +103,13 @@ namespace Baikal
 
     }
 
-    void AppVkRender::SetOutputType(Renderer<ClwScene>::OutputType type)
+    void AppVkRender::SetOutputType(OutputType type)
     {
+        for (int i = 0; i < m_cfgs.size(); ++i)
+        {
+            m_cfgs[i].renderer->SetOutput(m_output_type, nullptr);
+            m_cfgs[i].renderer->SetOutput(type, m_output.get());
+        }
         m_output_type = type;
     }
 
@@ -203,5 +212,6 @@ namespace Baikal
 
         std::cout << "Sensor size: " << settings.camera_sensor_size.x * 1000.f << "x" << settings.camera_sensor_size.y * 1000.f << "mm\n";
     }
+
 
 } // Baikal

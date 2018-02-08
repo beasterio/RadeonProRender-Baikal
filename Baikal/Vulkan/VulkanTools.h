@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "VulkanEZ.h"
+#include "vulkan/vulkan.h"
 #include "VulkanInitializers.hpp"
 
 #include <math.h>
@@ -79,36 +79,36 @@ namespace vks
 		// Returns false if none of the depth formats in the list is supported by the device
 		VkBool32 getSupportedDepthFormat(VkPhysicalDevice physicalDevice, VkFormat *depthFormat);
 
-		//// Put an image memory barrier for setting an image layout on the sub resource into the given command buffer
-		//void setImageLayout(
-		//	VkCommandBuffer cmdbuffer,
-		//	VkImage image,
-		//	VkImageLayout oldImageLayout,
-		//	VkImageLayout newImageLayout,
-		//	VkImageSubresourceRange subresourceRange,
-		//	VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		//	VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-		//// Uses a fixed sub resource layout with first mip level and layer
-		//void setImageLayout(
-		//	VkCommandBuffer cmdbuffer,
-		//	VkImage image,
-		//	VkImageAspectFlags aspectMask,
-		//	VkImageLayout oldImageLayout,
-		//	VkImageLayout newImageLayout,
-		//	VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-		//	VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+		// Put an image memory barrier for setting an image layout on the sub resource into the given command buffer
+		void setImageLayout(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkImageSubresourceRange subresourceRange,
+			VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+		// Uses a fixed sub resource layout with first mip level and layer
+		void setImageLayout(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkImageAspectFlags aspectMask,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 
-		///** @brief Inser an image memory barrier into the command buffer */
-		//void insertImageMemoryBarrier(
-		//	VkCommandBuffer cmdbuffer,
-		//	VkImage image,
-		//	VkAccessFlags srcAccessMask,
-		//	VkAccessFlags dstAccessMask,
-		//	VkImageLayout oldImageLayout,
-		//	VkImageLayout newImageLayout,
-		//	VkPipelineStageFlags srcStageMask,
-		//	VkPipelineStageFlags dstStageMask,
-		//	VkImageSubresourceRange subresourceRange);
+		/** @brief Inser an image memory barrier into the command buffer */
+		void insertImageMemoryBarrier(
+			VkCommandBuffer cmdbuffer,
+			VkImage image,
+			VkAccessFlags srcAccessMask,
+			VkAccessFlags dstAccessMask,
+			VkImageLayout oldImageLayout,
+			VkImageLayout newImageLayout,
+			VkPipelineStageFlags srcStageMask,
+			VkPipelineStageFlags dstStageMask,
+			VkImageSubresourceRange subresourceRange);
 
 		// Display error message and exit on fatal error
 		void exitFatal(std::string message, std::string caption, bool silent = false);

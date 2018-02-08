@@ -12,7 +12,7 @@
 
 #include <vector>
 
-#include "VulkanEZ.h"
+#include "vulkan/vulkan.h"
 #include "VulkanTools.h"
 
 namespace vks
@@ -25,8 +25,8 @@ namespace vks
 	{
 		VkDevice device;
 		VkBuffer buffer = VK_NULL_HANDLE;
-		//VkDeviceMemory memory = VK_NULL_HANDLE;
-		//VkDescriptorBufferInfo descriptor;
+		VkDeviceMemory memory = VK_NULL_HANDLE;
+		VkDescriptorBufferInfo descriptor;
 		VkDeviceSize size = 0;
 		VkDeviceSize alignment = 0;
 		void* mapped = nullptr;
@@ -34,7 +34,7 @@ namespace vks
 		/** @brief Usage flags to be filled by external source at buffer creation (to query at some later point) */
 		VkBufferUsageFlags usageFlags;
 		/** @brief Memory propertys flags to be filled by external source at buffer creation (to query at some later point) */
-		//VkMemoryPropertyFlags memoryPropertyFlags;
+		VkMemoryPropertyFlags memoryPropertyFlags;
 
 		/** 
 		* Map a memory range of this buffer. If successful, mapped points to the specified buffer range.
@@ -46,8 +46,7 @@ namespace vks
 		*/
 		VkResult map(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
 		{
-            //return vkMapMemory(device, memory, offset, size, 0, &mapped);
-            return vkMapBuffer(device, buffer, offset, size, &mapped);
+			return vkMapMemory(device, memory, offset, size, 0, &mapped);
 		}
 
 		/**
@@ -59,8 +58,7 @@ namespace vks
 		{
 			if (mapped)
 			{
-                //vkUnmapMemory(device, memory);
-                vkUnmapBuffer(device, buffer);
+				vkUnmapMemory(device, memory);
 				mapped = nullptr;
 			}
 		}
@@ -72,10 +70,10 @@ namespace vks
 		* 
 		* @return VkResult of the bindBufferMemory call
 		*/
-		//VkResult bind(VkDeviceSize offset = 0)
-		//{
-		//	return vkBindBufferMemory(device, buffer, memory, offset);
-		//}
+		VkResult bind(VkDeviceSize offset = 0)
+		{
+			return vkBindBufferMemory(device, buffer, memory, offset);
+		}
 
 		/**
 		* Setup the default descriptor for this buffer
@@ -84,12 +82,12 @@ namespace vks
 		* @param offset (Optional) Byte offset from beginning
 		*
 		*/
-		//void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
-		//{
-		//	descriptor.offset = offset;
-		//	descriptor.buffer = buffer;
-		//	descriptor.range = size;
-		//}
+		void setupDescriptor(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
+		{
+			descriptor.offset = offset;
+			descriptor.buffer = buffer;
+			descriptor.range = size;
+		}
 
 		/**
 		* Copies the specified data to the mapped buffer
@@ -116,11 +114,12 @@ namespace vks
 		*/
 		VkResult flush(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
 		{
-            VkMappedBufferRange mappedRange = {};
-            mappedRange.buffer = buffer;
+			VkMappedMemoryRange mappedRange = {};
+			mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+			mappedRange.memory = memory;
 			mappedRange.offset = offset;
 			mappedRange.size = size;
-			return vkFlushMappedBufferRanges(device, 1, &mappedRange);
+			return vkFlushMappedMemoryRanges(device, 1, &mappedRange);
 		}
 
 		/**
@@ -135,11 +134,12 @@ namespace vks
 		*/
 		VkResult invalidate(VkDeviceSize size = VK_WHOLE_SIZE, VkDeviceSize offset = 0)
 		{
-			VkMappedBufferRange mappedRange = {};
-			mappedRange.buffer = buffer;
+			VkMappedMemoryRange mappedRange = {};
+			mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+			mappedRange.memory = memory;
 			mappedRange.offset = offset;
 			mappedRange.size = size;
-			return vkInvalidateMappedBufferRanges(device, 1, &mappedRange);
+			return vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
 		}
 
 		/** 
@@ -149,12 +149,12 @@ namespace vks
 		{
 			if (buffer)
 			{
-				vkDestroyBuffer(device, buffer);
+				vkDestroyBuffer(device, buffer, nullptr);
 			}
-			//if (memory)
-			//{
-			//	vkFreeMemory(device, memory, nullptr);
-			//}
+			if (memory)
+			{
+				vkFreeMemory(device, memory, nullptr);
+			}
 		}
 
 	};

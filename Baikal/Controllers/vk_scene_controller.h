@@ -30,7 +30,7 @@
 
 #include "scene_controller.h"
 #include "SceneGraph/vkscene.h"
-
+#include "radeonrays.h"
 
 namespace Baikal
 {
@@ -46,7 +46,7 @@ namespace Baikal
     {
     public:
         // Constructor
-        VkSceneController();
+        VkSceneController(vks::VulkanDevice* device, rr_instance& instance);
         // Destructor
         virtual ~VkSceneController();
 
@@ -71,5 +71,10 @@ namespace Baikal
         void UpdateVolumes(Scene1 const& scene, Collector& volume_collector, VkScene& out) const override;
         // If scene attributes changed
         void UpdateSceneAttributes(Scene1 const& scene, Collector& tex_collector, VkScene& out) const override;
+    private:
+        void AllocateOnGPU(Scene1 const& scene, VkCommandBuffer copy_cmd, VkScene& out) const;
+
+        vks::VulkanDevice* m_vulkan_device;
+        rr_instance& m_instance;
     };
 }

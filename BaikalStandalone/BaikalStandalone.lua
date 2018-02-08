@@ -8,7 +8,9 @@ project "BaikalStandalone"
                 "../RadeonRays/CLW", "../Baikal", 
                 "../3rdparty",
                 "../3rdparty/VulkanEZ/include",
+                "../3rdparty/radeonrays-next/radeonrays/inc",
                 "../3rdparty/glm",
+                "../3rdparty/gli",
                 "."}
 
     if os.is("macosx") then

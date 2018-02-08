@@ -8,13 +8,15 @@
 
 namespace Baikal
 {
-    VkRenderFactory::VkRenderFactory()
+    VkRenderFactory::VkRenderFactory(vks::VulkanDevice* device)
+        : m_device(device)
     {
+        //rrInitInstance(m_device->logicalDevice, m_device->physicalDevice, vulkanDevice->computeCommandPool, &m_instance);
     }
 
     VkRenderFactory::~VkRenderFactory()
     {
-
+        //rrShutdownInstance(m_instance);
     }
 
     // Create a renderer of specified type
@@ -25,7 +27,7 @@ namespace Baikal
         {
             case RendererType::kUnidirectionalPathTracer:
                 return std::unique_ptr<Renderer<VkScene>>(
-                    new VkRenderer());
+                    new VkRenderer(m_device, m_instance));
             default:
                 throw std::runtime_error("Renderer not supported");
         }
@@ -35,7 +37,7 @@ namespace Baikal
                                                            std::uint32_t h)
                                                            const
     {
-        return std::unique_ptr<Output>(new VkOutput(w, h));
+        return std::unique_ptr<Output>(new VkOutput(m_device, w, h));
     }
 
     std::unique_ptr<PostEffect> VkRenderFactory::CreatePostEffect(
@@ -56,6 +58,6 @@ namespace Baikal
 
     std::unique_ptr<SceneController<VkScene>> VkRenderFactory::CreateSceneController() const
     {
-        return std::make_unique<VkSceneController>();
+        return std::make_unique<VkSceneController>(m_device, m_instance);
     }
 }

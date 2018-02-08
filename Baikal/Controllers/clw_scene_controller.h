@@ -110,7 +110,6 @@ namespace Baikal
     private:
         int GetMaterialIndex(Collector const& collector, Material::Ptr material) const;
         int GetVolumeIndex(Collector const& collector, VolumeMaterial::Ptr volume) const;
-
         // Context
         CLWContext m_context;
         // Intersection API

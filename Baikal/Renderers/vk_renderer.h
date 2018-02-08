@@ -21,18 +21,20 @@ THE SOFTWARE.
 ********************************************************************/
 #pragma once
 
+#include <memory>
+#include <map>
+
 #include "math/int2.h"
 #include "renderer.h"
+#include "Vulkan/VulkanDevice.hpp"
 
-#include "SceneGraph/clwscene.h"
-#include "Controllers/clw_scene_controller.h"
-#include "Utils/clw_class.h"
-#include "Estimators/estimator.h"
+//TODO: remove defines to another place
+#define LIGHT_COUNT 3
+#define VERTEX_BUFFER_BIND_ID 0
+#include "Output/vkoutput.h"
+#include "radeonrays.h"
 
-#include "CLW.h"
-
-#include <memory>
-
+class GPUProfiler;
 
 namespace Baikal
 {
@@ -44,7 +46,7 @@ namespace Baikal
     {
     public:
 
-        VkRenderer();
+        VkRenderer(vks::VulkanDevice* device, rr_instance instance);
 
         ~VkRenderer() = default;
 
@@ -60,12 +62,88 @@ namespace Baikal
                         RadeonRays::int2 const& tile_origin,
                         RadeonRays::int2 const& tile_size) override;
 
-        // Set output
-        void SetOutput(OutputType type, Output* output) override;
-
         void SetRandomSeed(std::uint32_t seed) override;
        
+        rr_instance GetRRInstance() const { return m_rr_instance; }
     protected:
-    };
+    private:
+        void Draw();
+        void BuildDeferredCommandBuffer(VkScene const* scene);
+        void RenderScene(VkCommandBuffer cmdBuffer, bool shadow);
+        void PreparePipelines();
+        VkPipelineShaderStageCreateInfo VkRenderer::LoadShader(std::string fileName, VkShaderStageFlagBits stage);
 
+        vks::VulkanDevice* m_vulkan_device;
+
+        mutable bool m_view_updated;
+
+        // List of shader modules created (stored for cleanup)
+        std::vector<VkShaderModule> m_shader_modules;
+
+        VkSemaphore m_ao_complete = VK_NULL_HANDLE;
+        VkSemaphore m_gi_complete = VK_NULL_HANDLE;
+        VkSemaphore m_ao_resolve_complete = VK_NULL_HANDLE;
+        VkSemaphore m_gi_resolve_complete = VK_NULL_HANDLE;
+        VkSemaphore m_bilateral_filter_complete = VK_NULL_HANDLE;
+        VkSemaphore m_bilateral_filter_ao_complete = VK_NULL_HANDLE;
+        VkSemaphore m_offscreen_semaphore = VK_NULL_HANDLE;
+        VkSemaphore m_shadow_semaphore = VK_NULL_HANDLE;
+        VkSemaphore m_transfer_complete = VK_NULL_HANDLE;
+        VkSemaphore m_generate_rays_complete = VK_NULL_HANDLE;
+        VkSemaphore m_gi_trace_complete[2] = { VK_NULL_HANDLE };
+        VkSemaphore m_ao_trace_complete = VK_NULL_HANDLE;
+        VkSemaphore m_render_complete = VK_NULL_HANDLE;
+
+        struct
+        {
+            VkCommandBuffer deferred = VK_NULL_HANDLE;
+            VkCommandBuffer shadow[LIGHT_COUNT];
+            VkCommandBuffer transferToHost = VK_NULL_HANDLE;
+            VkCommandBuffer ao = VK_NULL_HANDLE;
+            VkCommandBuffer gi = VK_NULL_HANDLE;
+            VkCommandBuffer aoResolve = VK_NULL_HANDLE;
+            VkCommandBuffer giResolve = VK_NULL_HANDLE;
+            VkCommandBuffer aoResolveAndClear = VK_NULL_HANDLE;
+            VkCommandBuffer giResolveAndClear = VK_NULL_HANDLE;
+            VkCommandBuffer bilateralFilter = VK_NULL_HANDLE;
+            VkCommandBuffer bilateralFilterAO = VK_NULL_HANDLE;
+            VkCommandBuffer textureRepack = VK_NULL_HANDLE;
+            VkCommandBuffer debug = VK_NULL_HANDLE;
+            VkCommandBuffer traceRays = VK_NULL_HANDLE;
+            VkCommandBuffer dbg_transferRaysToHost = VK_NULL_HANDLE;
+            VkCommandBuffer drawCmdBuffers = VK_NULL_HANDLE;
+        } m_command_buffers;
+
+        struct
+        {
+            VkPipeline deferred;
+            VkPipeline offscreen;
+            VkPipeline shadow;
+            VkPipeline ao;
+            VkPipeline gi;
+            VkPipeline aoResolve;
+            VkPipeline giResolve;
+            VkPipeline bilateralFilter;
+            VkPipeline textureRepack;
+            VkPipeline debug;
+        } m_pipelines;
+
+        struct
+        {
+            vks::Buffer raysStaging;
+            vks::Buffer raysLocal;
+            vks::Buffer hitsStaging;
+            vks::Buffer hitsLocal;
+            vks::Buffer textures;
+            vks::Buffer textureData;
+        } buffers;
+
+        // Depth bias (and slope) are used to avoid shadowing artefacts
+        float m_depth_bias_constant;
+        float m_depth_bias_slope;
+
+        rr_instance m_rr_instance;
+        GPUProfiler* m_profiler;
+
+    };
 }

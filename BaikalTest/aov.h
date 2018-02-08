@@ -74,7 +74,7 @@ TEST_F(AovTest, Aov_WorldPosition)
         m_output->width(), m_output->height()
     );
     
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kWorldPosition,
+    m_renderer->SetOutput(Baikal::OutputType::kWorldPosition,
                          output_ws.get());
     
     ClearOutput();
@@ -99,7 +99,7 @@ TEST_F(AovTest, Aov_WorldNormal)
          m_output->width(), m_output->height()
     );
     
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kWorldGeometricNormal,
+    m_renderer->SetOutput(Baikal::OutputType::kWorldGeometricNormal,
                           output_ws.get());
     
     ClearOutput();
@@ -124,7 +124,7 @@ TEST_F(AovTest, Aov_ShadingNormal)
          m_output->width(), m_output->height()
     );
     
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kWorldShadingNormal,
+    m_renderer->SetOutput(Baikal::OutputType::kWorldShadingNormal,
                           output_ws.get());
     
     ClearOutput();
@@ -149,7 +149,7 @@ TEST_F(AovTest, Aov_Tangent)
          m_output->width(), m_output->height()
     );
     
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kWorldTangent,
+    m_renderer->SetOutput(Baikal::OutputType::kWorldTangent,
                           output_ws.get());
     
     ClearOutput();
@@ -174,7 +174,7 @@ TEST_F(AovTest, Aov_Bitangent)
          m_output->width(), m_output->height()
     );
     
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kWorldBitangent,
+    m_renderer->SetOutput(Baikal::OutputType::kWorldBitangent,
                           output_ws.get());
     
     ClearOutput();
@@ -199,7 +199,7 @@ TEST_F(AovTest, Aov_Albedo)
         m_output->width(), m_output->height()
     );
     
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kAlbedo,
+    m_renderer->SetOutput(Baikal::OutputType::kAlbedo,
                           output_ws.get());
     
     ClearOutput();
@@ -224,7 +224,7 @@ TEST_F(AovTest, Aov_Uv)
       m_output->width(), m_output->height()
     );
 
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kUv,
+    m_renderer->SetOutput(Baikal::OutputType::kUv,
                           output_ws.get());
 
     ClearOutput();
@@ -249,7 +249,7 @@ TEST_F(AovTest, Aov_Visibility)
         m_output->width(), m_output->height()
     );
 
-    m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kVisibility,
+    m_renderer->SetOutput(Baikal::OutputType::kVisibility,
         output_ws.get());
 
     ClearOutput();

@@ -46,26 +46,28 @@ namespace Baikal
      Renderer implemenation is taking the scene and producing its image into
      an output surface.
      */
+
+    enum class OutputType
+    {
+        kColor,
+        kWorldPosition,
+        kWorldShadingNormal,
+        kWorldGeometricNormal,
+        kUv,
+        kWireframe,
+        kAlbedo,
+        kWorldTangent,
+        kWorldBitangent,
+        kGloss,
+        kMeshID,
+        kDepth,
+        kVisibility,
+        kMax
+    };
     template <typename CompiledScene> class Renderer
     {
     public:
-        enum class OutputType
-        {
-            kColor,
-            kWorldPosition,
-            kWorldShadingNormal,
-            kWorldGeometricNormal,
-            kUv,
-            kWireframe,
-            kAlbedo,
-            kWorldTangent,
-            kWorldBitangent,
-            kGloss,
-            kMeshID,
-            kDepth,
-            kVisibility,
-            kMax
-        };
+
 
         Renderer()
         {

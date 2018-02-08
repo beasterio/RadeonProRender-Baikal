@@ -194,12 +194,12 @@ namespace Baikal
     Output* MonteCarloRenderer::FindFirstNonZeroOutput(bool include_color) const
     {
         // Find first non-zero output
-        auto current_output = include_color ? GetOutput(Renderer::OutputType::kColor) : nullptr;
+        auto current_output = include_color ? GetOutput(OutputType::kColor) : nullptr;
         if (!current_output)
         {
-            for (auto i = 1U; i < static_cast<std::uint32_t>(Renderer::OutputType::kVisibility); ++i)
+            for (auto i = 1U; i < static_cast<std::uint32_t>(OutputType::kVisibility); ++i)
             {
-                current_output = GetOutput(static_cast<Renderer::OutputType>(i));
+                current_output = GetOutput(static_cast<OutputType>(i));
 
                 if (current_output)
                 {
@@ -268,9 +268,9 @@ namespace Baikal
         fill_kernel.SetArg(argc++, m_estimator->GetRandomBuffer(Estimator::RandomBufferType::kRandomSeed));
         fill_kernel.SetArg(argc++, m_estimator->GetRandomBuffer(Estimator::RandomBufferType::kSobolLUT));
         fill_kernel.SetArg(argc++, m_sample_counter);
-        for (auto i = 1U; i < static_cast<std::uint32_t>(Renderer::OutputType::kMax); ++i)
+        for (auto i = 1U; i < static_cast<std::uint32_t>(OutputType::kMax); ++i)
         {
-            if (auto aov = static_cast<ClwOutput*>(GetOutput(static_cast<Renderer::OutputType>(i))))
+            if (auto aov = static_cast<ClwOutput*>(GetOutput(static_cast<OutputType>(i))))
             {
                 fill_kernel.SetArg(argc++, 1);
                 fill_kernel.SetArg(argc++, aov->data());

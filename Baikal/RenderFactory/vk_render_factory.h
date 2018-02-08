@@ -22,15 +22,12 @@
  ********************************************************************/
 #pragma once
 
-#include "render_factory.h"
-#include "radeon_rays_cl.h"
-
-#include "CLW.h"
-
-#include "SceneGraph/vkscene.h"
-
 #include <memory>
 #include <string>
+
+#include "render_factory.h"
+#include "SceneGraph/vkscene.h"
+#include "Vulkan/VulkanDevice.hpp"
 
 
 namespace Baikal
@@ -45,7 +42,7 @@ namespace Baikal
     class VkRenderFactory : public RenderFactory<VkScene>
     {
     public:
-        VkRenderFactory();
+        VkRenderFactory(vks::VulkanDevice* device);
         ~VkRenderFactory();
         // Create a renderer of specified type
         std::unique_ptr<Renderer<VkScene> > 
@@ -61,5 +58,7 @@ namespace Baikal
             CreateSceneController() const override;
 
     private:
+        vks::VulkanDevice* m_device;
+        mutable rr_instance m_instance;
     };
 }

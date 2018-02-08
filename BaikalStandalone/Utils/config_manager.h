@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include "RenderFactory/clw_render_factory.h"
 #include "RenderFactory/vk_render_factory.h"
 #include "Renderers/renderer.h"
-#include "VulkanEZ.h"
+#include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
 

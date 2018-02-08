@@ -266,14 +266,14 @@ void ConfigManager::CreateConfigs(
 #endif
 
     // If requested, we enable the default validation layers for debugging
-    //if (enableValidation)
-    //{
-    //    // The report flags determine what type of messages for the layers will be displayed
-    //    // For validating (debugging) an application the error and warning bits should suffice
-    //    VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
-    //    // Additional flags include performance info, loader and layer debug messages, etc.
-    //    vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
-    //}
+    if (enableValidation)
+    {
+        //// The report flags determine what type of messages for the layers will be displayed
+        //// For validating (debugging) an application the error and warning bits should suffice
+        //VkDebugReportFlagsEXT debugReportFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+        //// Additional flags include performance info, loader and layer debug messages, etc.
+        //vks::debug::setupDebugging(conf.instance, debugReportFlags, VK_NULL_HANDLE);
+    }
 
     // Physical device
     uint32_t gpuCount = 0;
@@ -318,7 +318,7 @@ void ConfigManager::CreateConfigs(
 
     for (int i = 0; i < configs.size(); ++i)
     {
-        configs[i].factory = std::make_unique<Baikal::VkRenderFactory>();
+        configs[i].factory = std::make_unique<Baikal::VkRenderFactory>(configs[i].vulkan_device);
         configs[i].controller = configs[i].factory->CreateSceneController();
         configs[i].renderer = configs[i].factory->CreateRenderer(Baikal::VkRenderFactory::RendererType::kUnidirectionalPathTracer);
     }
@@ -365,31 +365,36 @@ VkResult ConfigManager::VkConfig::CreateInstance(bool enableValidation)
     }
     if (enableValidation)
     {
-        //instanceCreateInfo.enabledLayerCount = vks::debug::validationLayerCount;
-        //instanceCreateInfo.ppEnabledLayerNames = vks::debug::validationLayerNames;
+        const char *validationLayerNames[] = {
+            "VK_LAYER_LUNARG_standard_validation"
+        };
+
+        instanceCreateInfo.enabledLayerCount = 1;
+        instanceCreateInfo.ppEnabledLayerNames = validationLayerNames;
     }
     return vkCreateInstance(&instanceCreateInfo, &instance);
 }
 
 void ConfigManager::VkConfig::GetEnabledFeatures()
 {
-    // Enable anisotropic filtering if supported
-    if (device_features.samplerAnisotropy) {
-        enabled_features.samplerAnisotropy = VK_TRUE;
-    }
-    // Enable texture compression  
-    if (device_features.textureCompressionBC) {
-        enabled_features.textureCompressionBC = VK_TRUE;
-    }
-    else if (device_features.textureCompressionASTC_LDR) {
-        enabled_features.textureCompressionASTC_LDR = VK_TRUE;
-    }
-    else if (device_features.textureCompressionETC2) {
-        enabled_features.textureCompressionETC2 = VK_TRUE;
-    }
+    enabled_features = device_features;
+    //// Enable anisotropic filtering if supported
+    //if (device_features.samplerAnisotropy) {
+    //    enabled_features.samplerAnisotropy = VK_TRUE;
+    //}
+    //// Enable texture compression  
+    //if (device_features.textureCompressionBC) {
+    //    enabled_features.textureCompressionBC = VK_TRUE;
+    //}
+    //else if (device_features.textureCompressionASTC_LDR) {
+    //    enabled_features.textureCompressionASTC_LDR = VK_TRUE;
+    //}
+    //else if (device_features.textureCompressionETC2) {
+    //    enabled_features.textureCompressionETC2 = VK_TRUE;
+    //}
 
-    if (device_features.shaderStorageImageExtendedFormats)
-    {
-        enabled_features.shaderStorageImageExtendedFormats = VK_TRUE;
-    }
+    //if (device_features.shaderStorageImageExtendedFormats)
+    //{
+    //    enabled_features.shaderStorageImageExtendedFormats = VK_TRUE;
+    //}
 }

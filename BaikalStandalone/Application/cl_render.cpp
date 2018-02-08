@@ -44,7 +44,7 @@ THE SOFTWARE.
 
 namespace Baikal
 {
-    AppClRender::AppClRender(AppSettings& settings, GLuint tex) : m_tex(tex), m_output_type(Renderer<ClwScene>::OutputType::kColor)
+    AppClRender::AppClRender(AppSettings& settings, GLuint tex) : m_tex(tex), m_output_type(OutputType::kColor)
     {
         InitCl(settings, m_tex);
         LoadScene(settings);
@@ -134,13 +134,13 @@ namespace Baikal
             //m_outputs[i].denoiser = m_cfgs[i].factory->CreatePostEffect(Baikal::RenderFactory<Baikal::ClwScene>::PostEffectType::kBilateralDenoiser);
             m_outputs[i].denoiser = m_cfgs[i].factory->CreatePostEffect(Baikal::RenderFactory<Baikal::ClwScene>::PostEffectType::kWaveletDenoiser);
 #endif
-            m_cfgs[i].renderer->SetOutput(Baikal::Renderer<ClwScene>::OutputType::kColor, m_outputs[i].output.get());
+            m_cfgs[i].renderer->SetOutput(Baikal::OutputType::kColor, m_outputs[i].output.get());
 
 #ifdef ENABLE_DENOISER
-            m_cfgs[i].renderer->SetOutput(Baikal::Renderer<ClwScene>::OutputType::kWorldShadingNormal, m_outputs[i].output_normal.get());
-            m_cfgs[i].renderer->SetOutput(Baikal::Renderer<ClwScene>::OutputType::kWorldPosition, m_outputs[i].output_position.get());
-            m_cfgs[i].renderer->SetOutput(Baikal::Renderer<ClwScene>::OutputType::kAlbedo, m_outputs[i].output_albedo.get());
-            m_cfgs[i].renderer->SetOutput(Baikal::Renderer<ClwScene>::OutputType::kMeshID, m_outputs[i].output_mesh_id.get());
+            m_cfgs[i].renderer->SetOutput(Baikal::OutputType::kWorldShadingNormal, m_outputs[i].output_normal.get());
+            m_cfgs[i].renderer->SetOutput(Baikal::OutputType::kWorldPosition, m_outputs[i].output_position.get());
+            m_cfgs[i].renderer->SetOutput(Baikal::OutputType::kAlbedo, m_outputs[i].output_albedo.get());
+            m_cfgs[i].renderer->SetOutput(Baikal::OutputType::kMeshID, m_outputs[i].output_mesh_id.get());
 #endif
 
             m_outputs[i].fdata.resize(settings.width * settings.height);
@@ -593,7 +593,7 @@ namespace Baikal
         }
     }
 
-    void AppClRender::SetOutputType(Renderer<ClwScene>::OutputType type)
+    void AppClRender::SetOutputType(OutputType type)
     {
         for (int i = 0; i < m_cfgs.size(); ++i)
         {

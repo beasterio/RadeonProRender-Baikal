@@ -50,7 +50,7 @@ namespace Baikal
 
     private: 
         // Find required output
-        ClwOutput* FindOutput(InputSet const& input_set, Renderer<ClwScene>::OutputType type);
+        ClwOutput* FindOutput(InputSet const& input_set, OutputType type);
 
         CLWProgram m_program;
     };
@@ -66,7 +66,7 @@ namespace Baikal
         RegisterParameter("albedo_sensitivity", RadeonRays::float4(0.1f, 0.f, 0.f, 0.f));
     }
 
-    inline ClwOutput* BilateralDenoiser::FindOutput(InputSet const& input_set, Renderer<ClwScene>::OutputType type)
+    inline ClwOutput* BilateralDenoiser::FindOutput(InputSet const& input_set, OutputType type)
     {
         auto iter = input_set.find(type);
 
@@ -86,10 +86,10 @@ namespace Baikal
         auto sigma_normal = GetParameter("normal_sensitivity").x;
         auto sigma_albedo = GetParameter("albedo_sensitivity").x;
 
-        auto color = FindOutput(input_set, Renderer<ClwScene>::OutputType::kColor);
-        auto normal = FindOutput(input_set, Renderer<ClwScene>::OutputType::kWorldShadingNormal);
-        auto position = FindOutput(input_set, Renderer<ClwScene>::OutputType::kWorldPosition);
-        auto albedo = FindOutput(input_set, Renderer<ClwScene>::OutputType::kAlbedo);
+        auto color = FindOutput(input_set, OutputType::kColor);
+        auto normal = FindOutput(input_set, OutputType::kWorldShadingNormal);
+        auto position = FindOutput(input_set, OutputType::kWorldPosition);
+        auto albedo = FindOutput(input_set, OutputType::kAlbedo);
         auto out_color = static_cast<ClwOutput*>(&output);
 
         auto denoise_kernel = GetKernel("BilateralDenoise_main");

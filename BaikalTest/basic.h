@@ -118,7 +118,7 @@ public:
         ASSERT_NO_THROW(m_renderer = m_factory->CreateRenderer(Baikal::ClwRenderFactory::RendererType::kUnidirectionalPathTracer));
         ASSERT_NO_THROW(m_controller = m_factory->CreateSceneController());
         ASSERT_NO_THROW(m_output = m_factory->CreateOutput(kOutputWidth, kOutputHeight));
-        ASSERT_NO_THROW(m_renderer->SetOutput(Baikal::Renderer<Baikal::ClwScene>::OutputType::kColor, m_output.get()));
+        ASSERT_NO_THROW(m_renderer->SetOutput(Baikal::OutputType::kColor, m_output.get()));
 
         ASSERT_NO_THROW(LoadTestScene());
         ASSERT_NO_THROW(SetupCamera());

@@ -46,7 +46,7 @@ namespace Baikal
     {
     public:
         // Data type to pass all necessary content into the post effect. 
-        using InputSet = std::map<Renderer<ClwScene>::OutputType, Output*>;
+        using InputSet = std::map<OutputType, Output*>;
 
         // Default constructor & destructor
         PostEffect() = default;
