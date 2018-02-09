@@ -103,6 +103,22 @@ namespace Baikal
             return texture;
         }
 
+        //from memory
+        vks::Texture2D addTexture2D(std::string name, 
+                                    void const* buffer,
+                                    VkDeviceSize bufferSize,
+                                    VkFormat format,
+                                    uint32_t width,
+                                    uint32_t height,
+                                    vks::VulkanDevice *device,
+                                    VkQueue copyQueue)
+        {
+            vks::Texture2D texture;
+            texture.fromBuffer(buffer, bufferSize, format, width, height, device, copyQueue);
+            resources[name] = texture;
+            return texture;
+        }
+
         vks::TextureCubeMap addCubemap(std::string name, std::string filename, VkFormat format)
         {
             vks::TextureCubeMap texture;

@@ -269,8 +269,63 @@ namespace Baikal
         for (int i = 0; mesh_it->IsValid(); mesh_it->Next(), ++i)
         {
             Baikal::Mesh::Ptr mesh = mesh_it->ItemAs<Baikal::Mesh>();
-            int mat_indx = mat_collector.GetItemIndex(mesh->GetMaterial());
+            Baikal::Material::Ptr baikal_mat = mesh->GetMaterial();
+            int mat_indx = mat_collector.GetItemIndex(baikal_mat);
             out.meshes[i].material = &out.materials[mat_indx];
+
+            Baikal::SingleBxdf* single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(baikal_mat.get());
+            //get diffuse tex
+            if (single_bxdf)
+            {
+                auto input_value = single_bxdf->GetInputValue("albedo");
+                switch (input_value.type)
+                {
+                case Baikal::Material::InputType::kTexture:
+                {
+                    Texture::Ptr tex = input_value.tex_value;
+                    std::string name = input_value.tex_value->GetName();
+                    if (!out.resources.textures->present(name))
+                    {
+                        int w = tex->GetSize().x;
+                        int h = tex->GetSize().y;
+                        VkFormat format;
+                        switch (tex->GetFormat())
+                        {
+                        case Texture::Format::kRgba16:
+                            format = VK_FORMAT_R4G4B4A4_UNORM_PACK16;
+                            break;
+                        case Texture::Format::kRgba32:
+                            format = VK_FORMAT_R8G8B8A8_UINT;
+                            break;
+                        case Texture::Format::kRgba8:
+                            //TODO: handle kRgba8
+                        default:
+                            throw std::runtime_error("Error: unexpected Baikal::Texture format.");
+                        }
+                        out.resources.textures->addTexture2D(name, tex->GetData(), (VkDeviceSize)tex->GetSizeInBytes(), format, w, h, m_vulkan_device, queue);
+                    }
+                    out.materials[mat_indx].diffuse = out.resources.textures->get(name);
+                    break;
+                }
+                case Baikal::Material::InputType::kFloat4:
+                {
+                    std::string name = "kFloat4_" + std::to_string(i);
+                    if (!out.resources.textures->present(name))
+                    {
+                        RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
+                        color = { color.z, color.y, color.x, 1.f };
+                        int w = 1;
+                        int h = 1;
+                        VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                        out.resources.textures->addTexture2D(name, &color.x, sizeof(color), format, w, h, m_vulkan_device, queue);
+                    }
+                    out.materials[mat_indx].diffuse = out.resources.textures->get(name);
+                }
+                    break;
+                default:
+                    throw std::runtime_error("Error: unexpected albedo input type.");
+                }
+            }
         }
 
         //allocate materials buffer

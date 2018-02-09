@@ -381,7 +381,7 @@ namespace vks
 		* @param (Optional) imageLayout Usage layout for the texture (defaults VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 		*/
 		void fromBuffer(
-			void* buffer,
+			void const* buffer,
 			VkDeviceSize bufferSize,
 			VkFormat format,
 			uint32_t width,
@@ -395,8 +395,8 @@ namespace vks
 			assert(buffer);
 
 			this->device = device;
-			width = width;
-			height = height;
+            this->width = width;
+            this->height = height;
 			mipLevels = 1;
 
 			VkMemoryAllocateInfo memAllocInfo = vks::initializers::memoryAllocateInfo();
