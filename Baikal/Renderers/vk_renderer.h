@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "math/int2.h"
 #include "renderer.h"
 #include "Vulkan/VulkanDevice.hpp"
+#include "Vulkan/VulkanModel.hpp"
 
 //TODO: remove defines to another place
 #define LIGHT_COUNT 3
@@ -53,7 +54,7 @@ namespace Baikal
 
         VkRenderer(vks::VulkanDevice* device, rr_instance instance);
 
-        ~VkRenderer() = default;
+        ~VkRenderer();
 
         // Renderer overrides
         void Clear(RadeonRays::float3 const& val,
@@ -75,14 +76,21 @@ namespace Baikal
     private:
         void Draw();
         void BuildDeferredCommandBuffer(VkScene const* scene);
+        void BuildDrawCommandBuffers();
+
         void RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow);
         void PreparePipelines(VkScene const* scene);
-        VkPipelineShaderStageCreateInfo VkRenderer::LoadShader(std::string fileName, VkShaderStageFlagBits stage);
+        VkPipelineShaderStageCreateInfo LoadShader(std::string fileName, VkShaderStageFlagBits stage);
         void CreatePipelineCache();
         void SetupDescriptorSetLayout();
         void SetupDescriptorSet(VkScene const* scene);
         void SetupDescriptorPool();
-        void PrepareUniformBuffers(VkScene const* scene);
+        void SetupVertexDescriptions();
+        void PrepareUniformBuffers();
+        void PrepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
+        void PrepareBuffers(VkScene const* scene);
+        void UpdateUniformBuffers(VkScene const* scene);
+
 
         void UpdateUniformBuffersScreen();
         void UpdateUniformBufferDeferredMatrices(VkScene const* scene);
@@ -107,7 +115,6 @@ namespace Baikal
         VkSemaphore m_generate_rays_complete = VK_NULL_HANDLE;
         VkSemaphore m_gi_trace_complete[2] = { VK_NULL_HANDLE };
         VkSemaphore m_ao_trace_complete = VK_NULL_HANDLE;
-        VkSemaphore m_render_complete = VK_NULL_HANDLE;
 
         struct
         {
@@ -215,8 +222,6 @@ namespace Baikal
             VkFence transferToHost;
         } fences;
 
-        VkRenderPass renderPass;
-
         struct {
             VkPipelineVertexInputStateCreateInfo inputState;
             std::vector<VkVertexInputBindingDescription> bindingDescriptions;
@@ -240,6 +245,11 @@ namespace Baikal
 
         rr_instance m_rr_instance;
         GPUProfiler* m_profiler;
+
+        struct
+        {
+            vks::Model quad;
+        } models;
 
     };
 }

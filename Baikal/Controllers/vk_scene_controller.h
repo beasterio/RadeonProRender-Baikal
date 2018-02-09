@@ -72,7 +72,10 @@ namespace Baikal
         // If scene attributes changed
         void UpdateSceneAttributes(Scene1 const& scene, Collector& tex_collector, VkScene& out) const override;
     private:
+
         void AllocateOnGPU(Scene1 const& scene, VkCommandBuffer copy_cmd, VkScene& out) const;
+        void CreateDescriptorSets(VkScene& out) const;
+
 
         vks::VulkanDevice* m_vulkan_device;
         rr_instance& m_instance;

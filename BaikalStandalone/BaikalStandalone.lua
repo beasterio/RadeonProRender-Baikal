@@ -10,6 +10,7 @@ project "BaikalStandalone"
                 "../3rdparty/radeonrays-next/radeonrays/inc",
                 "../3rdparty/glm",
                 "../3rdparty/gli",
+                "../3rdparty/assimp",
                 "."}
 
     if os.is("macosx") then

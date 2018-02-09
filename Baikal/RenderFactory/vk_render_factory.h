@@ -29,7 +29,6 @@
 #include "SceneGraph/vkscene.h"
 #include "Vulkan/VulkanDevice.hpp"
 
-
 namespace Baikal
 {
     /**

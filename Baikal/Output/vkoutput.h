@@ -19,11 +19,28 @@ namespace Baikal
             vks::Framebuffer *deferred;
             // Framebuffer resources for the shadow pass
             vks::Framebuffer *shadow[LIGHT_COUNT];
+
+            VkRenderPass draw_render_pass;
+            VkFramebuffer draw_fb;
         } framebuffers;
     private:
-        void VkOutput::ShadowSetup();
-        void VkOutput::DeferredSetup();
+        void ShadowSetup();
+        void DeferredSetup();
+        void DrawSetup();
+        void SetupRenderPass();
+        void SetupDepthStencil();
+        void SetupOutput();
 
         vks::VulkanDevice* m_vulkan_device;
+
+        struct OutputFb
+        {
+            VkImage image;
+            VkDeviceMemory mem;
+            VkImageView view;
+        };
+
+        OutputFb m_depth_stencil;
+        OutputFb m_out;
     };
 }

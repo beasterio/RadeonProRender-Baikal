@@ -157,9 +157,27 @@ namespace Baikal
         auto& device = m_vulkan_device->logicalDevice;
         VkQueue graphics_queue;
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
+
         VkCommandBuffer copy_cmd = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
         AllocateOnGPU(scene, copy_cmd, out);
         vkFreeCommandBuffers(device, m_vulkan_device->commandPool, 1, &copy_cmd);
+
+        // Commit geometry to RR
+        VkCommandBuffer rrCommitCmdBuffer;
+        rrCommit(m_instance, &rrCommitCmdBuffer);
+
+        out.scene_vertices.clear();
+        out.scene_indices.clear();
+
+        VkQueue computeQueue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &computeQueue);
+
+        VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &rrCommitCmdBuffer;
+        VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE));
+        vkQueueWaitIdle(computeQueue);
 
     }
 
@@ -176,9 +194,15 @@ namespace Baikal
     // Update material data.
     void VkSceneController::UpdateMaterials(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        auto& device = m_vulkan_device->logicalDevice;
+        VkQueue queue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
+
         int num_materials = mat_collector.GetNumItems();
         out.materials.resize(num_materials);
         out.raytrace_materials.resize(num_materials);
+
+        out.InitResources(*m_vulkan_device, queue, "../Resources/");
 
         int startIdx = 0;
 
@@ -193,12 +217,11 @@ namespace Baikal
             raytrace_material.diffuse[1] = 1.0f;
             raytrace_material.diffuse[2] = 1.0f;
 
-            //out.materials[i].pipeline = resources.pipelines->get("scene.solid");
-
-            //out.materials[i].diffuse = resources.textures->get("dummy.diffuse");
-            //out.materials[i].roughness = resources.textures->get("dummy.specular");
-            //out.materials[i].metallic = resources.textures->get("dialectric.metallic");
-            //out.materials[i].bump = resources.textures->get("dummy.bump");
+            out.materials[i].pipeline = out.resources.pipelines->get("scene.solid");
+            out.materials[i].diffuse = out.resources.textures->get("dummy.diffuse");
+            out.materials[i].roughness = out.resources.textures->get("dummy.specular");
+            out.materials[i].metallic = out.resources.textures->get("dialectric.metallic");
+            out.materials[i].bump = out.resources.textures->get("dummy.bump");
 
             out.materials[i].hasBump = false;
             out.materials[i].hasAlpha = false;
@@ -210,8 +233,77 @@ namespace Baikal
         for (int i = 0; mesh_it->IsValid(); mesh_it->Next(), ++i)
         {
             Baikal::Mesh::Ptr mesh = mesh_it->ItemAs<Baikal::Mesh>();
-            out.meshes[i].material = &out.materials[mat_collector.GetItemIndex(mesh->GetMaterial())];
+            int mat_indx = mat_collector.GetItemIndex(mesh->GetMaterial());
+            out.meshes[i].material = &out.materials[mat_indx];
         }
+
+        //allocate materials buffer
+        auto materialBufferSize = static_cast<uint32_t>(num_materials * sizeof(Raytrace::Material));
+
+        struct  
+        {
+            struct 
+            {
+                VkDeviceMemory memory;
+                VkBuffer buffer;
+            } raytraceMaterialBuffer;
+        }staging;
+
+        void *data;
+
+        VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+        VkMemoryRequirements memReqs;
+        VkBufferCreateInfo raytraceMaterialBufferInfo;
+        // Staging buffer
+        raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, materialBufferSize);
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &staging.raytraceMaterialBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.raytraceMaterialBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceMaterialBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceMaterialBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+        memcpy(data, out.raytrace_materials.data(), materialBufferSize);
+        vkUnmapMemory(device, staging.raytraceMaterialBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceMaterialBuffer.buffer, staging.raytraceMaterialBuffer.memory, 0));
+
+        // Target
+        raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, materialBufferSize);
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &out.raytrace_material_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.raytrace_material_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_material_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_material_buffer.buffer, out.raytrace_material_buffer.memory, 0));
+        //out.raytrace_material_buffer.size = memReqs.size;
+        out.raytrace_material_buffer.size = materialBufferSize;
+
+        // Copy
+        VkCommandBuffer copy_cmd = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        VK_CHECK_RESULT(vkBeginCommandBuffer(copy_cmd, &cmdBufInfo));
+        VkBufferCopy copyRegion = {};
+        copyRegion.size = materialBufferSize;
+        vkCmdCopyBuffer(
+            copy_cmd,
+            staging.raytraceMaterialBuffer.buffer,
+            out.raytrace_material_buffer.buffer,
+            1,
+            &copyRegion);
+        VK_CHECK_RESULT(vkEndCommandBuffer(copy_cmd));
+        
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &copy_cmd;
+        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+        VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+
+        //free
+        vkFreeCommandBuffers(device, m_vulkan_device->commandPool, 1, &copy_cmd);
+        vkDestroyBuffer(device, staging.raytraceMaterialBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.raytraceMaterialBuffer.memory, nullptr);
+
+        CreateDescriptorSets(out);
     }
 
     // Update texture data only.
@@ -250,7 +342,6 @@ namespace Baikal
         size_t vertexDataSize = out.vertices.size() * sizeof(Vertex);
         size_t indexDataSize = out.indices.size() * sizeof(uint32_t);
         auto shapeBufferSize = static_cast<uint32_t>(out.raytrace_shapes.size() * sizeof(Raytrace::Shape));
-        auto materialBufferSize = static_cast<uint32_t>(out.raytrace_materials.size() * sizeof(Raytrace::Material));
         auto raytraceVertexDataSize = out.vertices.size() * sizeof(Vertex);
 
         VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
@@ -272,10 +363,6 @@ namespace Baikal
                 VkDeviceMemory memory;
                 VkBuffer buffer;
             } raytraceShapeBuffer;
-            struct {
-                VkDeviceMemory memory;
-                VkBuffer buffer;
-            } raytraceMaterialBuffer;
             struct {
                 VkDeviceMemory memory;
                 VkBuffer buffer;
@@ -334,7 +421,8 @@ namespace Baikal
         memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.index_buffer.memory));
         VK_CHECK_RESULT(vkBindBufferMemory(device, out.index_buffer.buffer, out.index_buffer.memory, 0));
-        out.index_buffer.size = memReqs.size;
+        //out.index_buffer.size = memReqs.size;
+        out.index_buffer.size = indexDataSize;
 
         // Generate raytrace shape buffer
         VkBufferCreateInfo raytraceShapeBufferInfo;
@@ -359,33 +447,8 @@ namespace Baikal
         memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_shape_buffer.memory));
         VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_shape_buffer.buffer, out.raytrace_shape_buffer.memory, 0));
-        out.raytrace_shape_buffer.size = memReqs.size;
-
-        // Generate raytrace shape buffer
-        VkBufferCreateInfo raytraceMaterialBufferInfo;
-
-        // Staging buffer
-        raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, materialBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &staging.raytraceMaterialBuffer.buffer));
-        vkGetBufferMemoryRequirements(device, staging.raytraceMaterialBuffer.buffer, &memReqs);
-        memAlloc.allocationSize = memReqs.size;
-        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceMaterialBuffer.memory));
-        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceMaterialBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        memcpy(data, out.raytrace_materials.data(), materialBufferSize);
-        vkUnmapMemory(device, staging.raytraceMaterialBuffer.memory);
-        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceMaterialBuffer.buffer, staging.raytraceMaterialBuffer.memory, 0));
-
-        // Target
-        raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, materialBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &out.raytrace_material_buffer.buffer));
-        vkGetBufferMemoryRequirements(device, out.raytrace_material_buffer.buffer, &memReqs);
-        memAlloc.allocationSize = memReqs.size;
-        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_material_buffer.memory));
-        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_material_buffer.buffer, out.raytrace_material_buffer.memory, 0));
-        out.raytrace_material_buffer.size = memReqs.size;
-
+        //out.raytrace_shape_buffer.size = memReqs.size;
+        out.raytrace_shape_buffer.size = shapeBufferSize;
 
         // Generate raytrace shape buffer
         VkBufferCreateInfo raytraceRNGBufferInfo;
@@ -473,14 +536,6 @@ namespace Baikal
             1,
             &copyRegion);
 
-        copyRegion.size = materialBufferSize;
-        vkCmdCopyBuffer(
-            copy_cmd,
-            staging.raytraceMaterialBuffer.buffer,
-            out.raytrace_material_buffer.buffer,
-            1,
-            &copyRegion);
-
         copyRegion.size = kRNGBufferSize;
         vkCmdCopyBuffer(
             copy_cmd,
@@ -513,11 +568,13 @@ namespace Baikal
         vkFreeMemory(device, staging.iBuffer.memory, nullptr);
         vkDestroyBuffer(device, staging.raytraceShapeBuffer.buffer, nullptr);
         vkFreeMemory(device, staging.raytraceShapeBuffer.memory, nullptr);
-        vkDestroyBuffer(device, staging.raytraceMaterialBuffer.buffer, nullptr);
-        vkFreeMemory(device, staging.raytraceMaterialBuffer.memory, nullptr);
         vkDestroyBuffer(device, staging.raytraceRNGBuffer.buffer, nullptr);
         vkFreeMemory(device, staging.raytraceRNGBuffer.memory, nullptr);
+    }
 
+    void VkSceneController::CreateDescriptorSets(VkScene& out) const
+    {
+        auto& device = m_vulkan_device->logicalDevice;
         // Generate descriptor sets for all meshes
         // todo : think about a nicer solution, better suited per material?
 
