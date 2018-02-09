@@ -236,11 +236,13 @@ namespace Baikal
             colorSwizzle = (std::find(formatsBGR.begin(), formatsBGR.end(), format) != formatsBGR.end());
         }
 
+        int w = width();
+        int h = height();
         // ppm binary pixel data
-        for (uint32_t y = 0; y < height(); y++)
+        for (uint32_t y = 0; y < h; y++)
         {
             unsigned int *row = (unsigned int*)data;
-            for (uint32_t x = 0; x < width(); x++)
+            for (uint32_t x = 0; x < w; x++)
             {
                 unsigned char rgb[4];
                 if (colorSwizzle)
@@ -254,9 +256,11 @@ namespace Baikal
                 {
                     memcpy(rgb, row, 4);
                 }
-                out_data[width() * y + x] = { (float)rgb[0] / 255.f,
+
+                out_data[w * y + x] = { (float)rgb[0] / 255.f,
                                                     (float)rgb[1] / 255.f,
-                                                    (float)rgb[2] / 255.f };
+                                                    (float)rgb[2] / 255.f,
+                                                    (float)rgb[3] / 255.f };
                 row++;
             }
             data += subResourceLayout.rowPitch;

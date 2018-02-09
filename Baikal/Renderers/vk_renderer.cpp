@@ -90,10 +90,10 @@ namespace Baikal
             SetupDescriptorSet(&scene);
             SetupVertexDescriptions();
             PreparePipelines(&scene);
-            UpdateUniformBuffers(&scene);
             BuildDeferredCommandBuffer(&scene);
             BuildDrawCommandBuffers();
         }
+        UpdateUniformBuffers(&scene);
 
         Draw();
         m_view_updated = false;
@@ -2184,6 +2184,7 @@ namespace Baikal
 
             glm::mat4 mvp = shadowProj * shadowView;
             uboFragmentLights.lights[i].viewMatrix = mvp;
+            uboFragmentLights.lights[i] = scene->lights[i];
         }
 
         if (m_view_updated)

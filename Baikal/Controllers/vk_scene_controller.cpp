@@ -58,6 +58,21 @@ namespace Baikal
 
     void VkSceneController::UpdateCamera(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        const Baikal::PerspectiveCamera* baikal_cam = dynamic_cast<const Baikal::PerspectiveCamera*>(scene.GetCamera().get());
+        RadeonRays::float3 pos = baikal_cam->GetPosition();
+        RadeonRays::float3 at = baikal_cam->GetForwardVector() + pos;
+        RadeonRays::float3 up = baikal_cam->GetUpVector();
+        float aspect = baikal_cam->GetAspectRatio();
+        //float zNear = baikal_cam->GetDepthRange().x;
+        //float zFar = baikal_cam->GetDepthRange().y;
+        float zNear = 0.2;
+        float zFar = 500;
+        float FOV = 60.0f;
+        out.camera.setPerspective(FOV, aspect, zNear, zFar);
+
+        out.camera.matrices.view = glm::lookAt(glm::vec3{ pos.x, pos.y, pos.z },
+                                                glm::vec3{ at.x, at.y, at.z },
+                                                glm::vec3{ up.x, up.y, up.z });
     }
 
     // Update shape data only.
@@ -103,10 +118,12 @@ namespace Baikal
             for (uint32_t i = 0; i < mesh->GetNumVertices(); i++)
             {
                 vertices[i].pos = glm::make_vec3(&mesh->GetVertices()[i].x);// *0.5f;
-                vertices[i].pos.y = -vertices[i].pos.y;
+                //vertices[i].pos.y = -vertices[i].pos.y;
+                vertices[i].pos.y = vertices[i].pos.y;
                 vertices[i].uv = (hasUV) ? glm::make_vec2(&mesh->GetUVs()[i].x) : glm::vec2(0.0f);
                 vertices[i].normal = glm::make_vec3(&mesh->GetNormals()[i].x);
-                vertices[i].normal.y = -vertices[i].normal.y;
+                //vertices[i].normal.y = -vertices[i].normal.y;
+                vertices[i].normal.y = vertices[i].normal.y;
                 vertices[i].color = glm::vec3(1.0f); // todo : take from material
                 //TODO: fix tangent
                 //vertices[i].tangent = (hasTangent) ? glm::make_vec3(&aMesh->mTangents[i].x) : glm::vec3(0.0f, 1.0f, 0.0f);
@@ -189,6 +206,25 @@ namespace Baikal
     // Update lights data only.
     void VkSceneController::UpdateLights(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        out.lights.clear();
+        auto it = scene.CreateLightIterator();
+        for (; it->IsValid(); it->Next())
+        {
+            VkLight l;
+            Baikal::Light::Ptr baikal_light = it->ItemAs<Baikal::Light>();
+            RadeonRays::float3 col = baikal_light->GetEmittedRadiance();
+            RadeonRays::float3 pos = baikal_light->GetPosition();
+            RadeonRays::float3 target = baikal_light->GetPosition() + baikal_light->GetDirection();
+
+            l.color = { col.x, col.y, col.z, 1.f};
+            //l.position = { pos.x, -pos.y, pos.z, 1.f };
+            //l.target = { target.x, -target.y, target.z, 1.f };
+            l.position = { pos.x, pos.y, pos.z, 1.f };
+            l.target = { target.x, target.y, target.z, 1.f };
+
+            out.lights.push_back(l);
+        }
+
     }
 
     // Update material data.

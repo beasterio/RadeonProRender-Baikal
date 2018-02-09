@@ -234,6 +234,7 @@ namespace Baikal
 
         std::vector<SceneMaterial> materials;
         std::vector<SceneMesh> meshes;
+        std::vector<VkLight> lights;
         std::vector<Raytrace::Shape> raytrace_shapes;
         std::vector<Raytrace::Material> raytrace_materials;
 

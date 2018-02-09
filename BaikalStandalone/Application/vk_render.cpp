@@ -63,7 +63,8 @@ namespace Baikal
         m_output.output->GetData(&m_output.fdata[0]);
 #endif
 
-        float gamma = 2.2f;
+        //float gamma = 2.2f;
+        float gamma = 1.f;
         for (int i = 0; i < (int)m_output.fdata.size(); ++i)
         {
             m_output.udata[4 * i] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].x / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
