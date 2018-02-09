@@ -27,6 +27,7 @@ THE SOFTWARE.
 namespace Baikal
 {
     AppVkRender::AppVkRender(AppSettings& settings, GLuint tex)
+        : m_tex(tex)
     {
         InitVk(settings, tex);
         LoadScene(settings);
@@ -43,7 +44,9 @@ namespace Baikal
             settings.platform_index,
             settings.device_index);
 
-        m_output = m_cfgs[m_primary].factory->CreateOutput(settings.width, settings.height);
+        m_output.output = m_cfgs[m_primary].factory->CreateOutput(settings.width, settings.height);
+        m_output.fdata.resize(settings.width * settings.height);
+        m_output.udata.resize(settings.width * settings.height * 4);
         m_output_type = OutputType::kColor;
         SetOutputType(OutputType::kColor);
     }
@@ -52,6 +55,27 @@ namespace Baikal
     void AppVkRender::Update(AppSettings& settings)
     {
         //TODO: add interop
+        int width = m_output.output->width();
+        int height = m_output.output->height();
+#ifdef ENABLE_DENOISER
+        m_outputs[m_primary].output_denoised->GetData(&m_outputs[m_primary].fdata[0]);
+#else
+        m_output.output->GetData(&m_output.fdata[0]);
+#endif
+
+        float gamma = 2.2f;
+        for (int i = 0; i < (int)m_output.fdata.size(); ++i)
+        {
+            m_output.udata[4 * i] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].x / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+            m_output.udata[4 * i + 1] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].y / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+            m_output.udata[4 * i + 2] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].z / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+            m_output.udata[4 * i + 3] = 1;
+        }
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_tex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_output.output->width(), m_output.output->height(), GL_RGBA, GL_UNSIGNED_BYTE, &m_output.udata[0]);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     //compile scene
@@ -63,7 +87,7 @@ namespace Baikal
             if (i == m_primary)
             {
                 m_cfgs[i].controller->CompileScene(m_scene);
-                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_output);
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_output.output);
 
 #ifdef ENABLE_DENOISER
                 m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_normal);
@@ -108,7 +132,7 @@ namespace Baikal
         for (int i = 0; i < m_cfgs.size(); ++i)
         {
             m_cfgs[i].renderer->SetOutput(m_output_type, nullptr);
-            m_cfgs[i].renderer->SetOutput(type, m_output.get());
+            m_cfgs[i].renderer->SetOutput(type, m_output.output.get());
         }
         m_output_type = type;
     }

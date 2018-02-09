@@ -37,16 +37,6 @@ namespace Baikal
         struct OutputData
         {
             std::unique_ptr<Baikal::Output> output;
-
-#ifdef ENABLE_DENOISER
-            std::unique_ptr<Baikal::Output> output_position;
-            std::unique_ptr<Baikal::Output> output_normal;
-            std::unique_ptr<Baikal::Output> output_albedo;
-            std::unique_ptr<Baikal::Output> output_mesh_id;
-            std::unique_ptr<Baikal::Output> output_denoised;
-            std::unique_ptr<Baikal::PostEffect> denoiser;
-#endif
-
             std::vector<RadeonRays::float3> fdata;
             std::vector<unsigned char> udata;
             //CLWBuffer<RadeonRays::float3> copybuffer;
@@ -108,6 +98,9 @@ namespace Baikal
         // //save GL tex for no interop case
         // GLuint m_tex;
         OutputType m_output_type;
-        std::unique_ptr<Baikal::Output> m_output;
+        OutputData m_output;
+
+        //gl_reder tex
+        GLuint m_tex;
     };
 }
