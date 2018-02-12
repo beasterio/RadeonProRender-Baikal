@@ -66,8 +66,6 @@ namespace Baikal
     {
         delete m_profiler;
         m_profiler = nullptr;
-
-        auto& device = m_vulkan_device->logicalDevice;
     }
 
     // Renderer overrides
@@ -2176,7 +2174,7 @@ namespace Baikal
         uboFragmentLights.invView = glm::inverse(camera.matrices.view);
         uboFragmentLights.invProj = glm::inverse(camera.matrices.perspective);
 
-        for (uint32_t i = 0; i < LIGHT_COUNT; i++)
+        for (uint32_t i = 0; i < LIGHT_COUNT, i < scene->lights.size(); i++)
         {
             // mvp from light's pov (for shadows)
             glm::mat4 shadowProj = glm::perspective(glm::radians(lightFOV), 1.0f, zNear, zFar);

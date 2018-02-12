@@ -23,6 +23,99 @@ namespace Baikal
         return (value + 0xF) / 0x10 * 0x10;
     }
 
+    bool MaterialInputValid(const std::string& input_name, Baikal::Material::Ptr mat)
+    {
+        bool valid = false;
+        Baikal::SingleBxdf* single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(mat.get());
+        if (!single_bxdf)
+        {
+            return false;
+        }
+
+        auto input_value = mat->GetInputValue(input_name);
+        switch (input_value.type)
+        {
+        case Baikal::Material::InputType::kTexture:
+            valid = input_value.tex_value ? true : false;
+            break;
+        case Baikal::Material::InputType::kFloat4:
+            valid = true;
+            break;
+        case Baikal::Material::InputType::kMaterial:
+        case Baikal::Material::InputType::kUint:
+            valid = false;
+            break;
+        default:
+            throw std::runtime_error("Error: unexpected input type.");
+
+        }
+
+        return valid;
+    }
+    vks::Texture TranslateMaterialInput(vks::VulkanDevice* device, const std::string& input_name, Baikal::Material::Ptr mat, VkScene::Resources& res)
+    {
+        vks::Texture result;
+
+        VkQueue queue;
+        vkGetDeviceQueue(device->logicalDevice, device->queueFamilyIndices.graphics, 0, &queue);
+        Baikal::SingleBxdf* single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(mat.get());
+        //get diffuse tex
+        if (single_bxdf)
+        {
+            auto input_value = single_bxdf->GetInputValue(input_name);
+            switch (input_value.type)
+            {
+            case Baikal::Material::InputType::kTexture:
+            {
+                Texture::Ptr tex = input_value.tex_value;
+                std::string name = input_value.tex_value->GetName();
+                if (!res.textures->present(name))
+                {
+                    int w = tex->GetSize().x;
+                    int h = tex->GetSize().y;
+                    VkFormat format;
+                    switch (tex->GetFormat())
+                    {
+                    case Texture::Format::kRgba16:
+                        format = VK_FORMAT_R16G16B16A16_UINT;
+                        break;
+                    case Texture::Format::kRgba32:
+                        format = VK_FORMAT_R32G32B32A32_UINT;
+                        break;
+                    case Texture::Format::kRgba8:
+                        format = VK_FORMAT_R8G8B8A8_UINT;
+                        break;
+                    default:
+                        throw std::runtime_error("Error: unexpected Baikal::Texture format.");
+                    }
+                    res.textures->addTexture2D(name, tex->GetData(), (VkDeviceSize)tex->GetSizeInBytes(), format, w, h, device, queue);
+                }
+                result = res.textures->get(name);
+                break;
+            }
+            case Baikal::Material::InputType::kFloat4:
+            {
+                std::string name = mat->GetName() + "_" + input_name + "_" +"kFloat4";
+                if (!res.textures->present(name))
+                {
+                    RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
+                    color = { color.z, color.y, color.x, 1.f };
+                    int w = 1;
+                    int h = 1;
+                    VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                    res.textures->addTexture2D(name, &color.x, sizeof(color), format, w, h, device, queue);
+                }
+                result = res.textures->get(name);
+            }
+            break;
+            default:
+                throw std::runtime_error("Error: unexpected input type.");
+            }
+        }
+
+        return result;
+    }
+
     uint32_t GetMemTypeIndex(VkPhysicalDevice physicalDevice, uint32_t typeBits, VkFlags properties)
     {
         VkPhysicalDeviceMemoryProperties deviceMemProps;
@@ -273,58 +366,21 @@ namespace Baikal
             int mat_indx = mat_collector.GetItemIndex(baikal_mat);
             out.meshes[i].material = &out.materials[mat_indx];
 
-            Baikal::SingleBxdf* single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(baikal_mat.get());
-            //get diffuse tex
-            if (single_bxdf)
+            if (MaterialInputValid("albedo", baikal_mat))
             {
-                auto input_value = single_bxdf->GetInputValue("albedo");
-                switch (input_value.type)
-                {
-                case Baikal::Material::InputType::kTexture:
-                {
-                    Texture::Ptr tex = input_value.tex_value;
-                    std::string name = input_value.tex_value->GetName();
-                    if (!out.resources.textures->present(name))
-                    {
-                        int w = tex->GetSize().x;
-                        int h = tex->GetSize().y;
-                        VkFormat format;
-                        switch (tex->GetFormat())
-                        {
-                        case Texture::Format::kRgba16:
-                            format = VK_FORMAT_R4G4B4A4_UNORM_PACK16;
-                            break;
-                        case Texture::Format::kRgba32:
-                            format = VK_FORMAT_R8G8B8A8_UINT;
-                            break;
-                        case Texture::Format::kRgba8:
-                            //TODO: handle kRgba8
-                        default:
-                            throw std::runtime_error("Error: unexpected Baikal::Texture format.");
-                        }
-                        out.resources.textures->addTexture2D(name, tex->GetData(), (VkDeviceSize)tex->GetSizeInBytes(), format, w, h, m_vulkan_device, queue);
-                    }
-                    out.materials[mat_indx].diffuse = out.resources.textures->get(name);
-                    break;
-                }
-                case Baikal::Material::InputType::kFloat4:
-                {
-                    std::string name = "kFloat4_" + std::to_string(i);
-                    if (!out.resources.textures->present(name))
-                    {
-                        RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
-                        color = { color.z, color.y, color.x, 1.f };
-                        int w = 1;
-                        int h = 1;
-                        VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
-                        out.resources.textures->addTexture2D(name, &color.x, sizeof(color), format, w, h, m_vulkan_device, queue);
-                    }
-                    out.materials[mat_indx].diffuse = out.resources.textures->get(name);
-                }
-                    break;
-                default:
-                    throw std::runtime_error("Error: unexpected albedo input type.");
-                }
+                out.meshes[i].material->diffuse = TranslateMaterialInput(m_vulkan_device, "albedo", baikal_mat, out.resources);
+            }
+
+            if (MaterialInputValid("bump", baikal_mat))
+            {
+                out.meshes[i].material->bump = TranslateMaterialInput(m_vulkan_device, "bump", baikal_mat, out.resources);
+                out.meshes[i].material->hasBump = true;
+            }
+
+            if (MaterialInputValid("roughness", baikal_mat))
+            {
+                out.meshes[i].material->roughness = TranslateMaterialInput(m_vulkan_device, "roughness", baikal_mat, out.resources);
+                out.meshes[i].material->hasRoughness = true;
             }
         }
 
@@ -433,7 +489,7 @@ namespace Baikal
         size_t vertexDataSize = out.vertices.size() * sizeof(Vertex);
         size_t indexDataSize = out.indices.size() * sizeof(uint32_t);
         auto shapeBufferSize = static_cast<uint32_t>(out.raytrace_shapes.size() * sizeof(Raytrace::Shape));
-        auto raytraceVertexDataSize = out.vertices.size() * sizeof(Vertex);
+        auto raytraceVertexDataSize = out.vertices.size() * sizeof(RaytraceVertex);
 
         VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
         VkMemoryRequirements memReqs;
@@ -595,7 +651,8 @@ namespace Baikal
         memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_vertex_buffer.memory));
         VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_vertex_buffer.buffer, out.raytrace_vertex_buffer.memory, 0));
-        out.raytrace_vertex_buffer.size = memReqs.size;
+        //out.raytrace_vertex_buffer.size = memReqs.size;
+        out.raytrace_vertex_buffer.size = raytraceVertexDataSize;
 
         // Copy
         VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
