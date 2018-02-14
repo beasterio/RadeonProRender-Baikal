@@ -31,6 +31,7 @@ THE SOFTWARE.
 
 //TODO: remove defines to another place
 #define LIGHT_COUNT 3
+//#define LIGHT_COUNT 2
 #define VERTEX_BUFFER_BIND_ID 0
 #include "Output/vkoutput.h"
 #include "radeonrays.h"

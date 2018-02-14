@@ -77,17 +77,19 @@ namespace Baikal
                     switch (tex->GetFormat())
                     {
                     case Texture::Format::kRgba16:
-                        format = VK_FORMAT_R16G16B16A16_UINT;
+                        format = VK_FORMAT_R16G16B16A16_UNORM;
                         break;
                     case Texture::Format::kRgba32:
                         format = VK_FORMAT_R32G32B32A32_UINT;
                         break;
                     case Texture::Format::kRgba8:
-                        format = VK_FORMAT_R8G8B8A8_UINT;
+                        format = VK_FORMAT_B8G8R8A8_UNORM;
                         break;
                     default:
                         throw std::runtime_error("Error: unexpected Baikal::Texture format.");
                     }
+                    //res.textures->addTexture2D(name, name, VK_FORMAT_BC2_UNORM_BLOCK);
+                    //format = VK_FORMAT_BC2_UNORM_BLOCK;
                     res.textures->addTexture2D(name, tex->GetData(), (VkDeviceSize)tex->GetSizeInBytes(), format, w, h, device, queue);
                 }
                 result = res.textures->get(name);
@@ -100,6 +102,7 @@ namespace Baikal
                 {
                     RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
                     color = { color.z, color.y, color.x, 1.f };
+                    //color = { color.z, color.y, color.x, 1.f };
                     int w = 1;
                     int h = 1;
                     VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -111,6 +114,19 @@ namespace Baikal
             default:
                 throw std::runtime_error("Error: unexpected input type.");
             }
+        }
+        else
+        {
+            std::string name = mat->GetName() + "_" + input_name + "_" + "kFloat4";
+            if (!res.textures->present(name))
+            {
+                RadeonRays::float4 color = { 1, 0, 0, 1.f };
+                int w = 1;
+                int h = 1;
+                VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                res.textures->addTexture2D(name, &color.x, sizeof(color), format, w, h, device, queue);
+            }
+            result = res.textures->get(name);
         }
 
         return result;
@@ -159,7 +175,7 @@ namespace Baikal
         //float zNear = baikal_cam->GetDepthRange().x;
         //float zFar = baikal_cam->GetDepthRange().y;
         float zNear = 0.2;
-        float zFar = 500;
+        float zFar = 10000;
         float FOV = 60.0f;
         out.camera.setPerspective(FOV, aspect, zNear, zFar);
 

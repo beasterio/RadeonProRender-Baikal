@@ -131,6 +131,7 @@ namespace Baikal
         submit_info.pWaitDstStageMask = &stageFlags;
         submit_info.pSignalSemaphores = &m_offscreen_semaphore;
         submit_info.signalSemaphoreCount = 1;
+        //submit_info.signalSemaphoreCount = 0;
         submit_info.pCommandBuffers = &m_command_buffers.deferred;
         submit_info.commandBufferCount = 1;
         VK_CHECK_RESULT(vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE));
@@ -292,9 +293,14 @@ namespace Baikal
 
         {
             VkSemaphore waitSemaphores[] = { m_shadow_semaphore, m_bilateral_filter_complete, m_bilateral_filter_ao_complete };
+            //VkSemaphore waitSemaphores[] = { m_shadow_semaphore, m_offscreen_semaphore};
             // Scene rendering
             submit_info.pWaitSemaphores = waitSemaphores;
             submit_info.waitSemaphoreCount = 3;
+            //submit_info.pWaitSemaphores = waitSemaphores;
+            //submit_info.waitSemaphoreCount = 2;
+            
+            
             VkPipelineStageFlags stageFlags[] = {
                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -446,7 +452,9 @@ namespace Baikal
                     continue;
                 }
                 //vkCmdBindDescriptorSets(shadowmapPass.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
-                vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, 0, mesh.indexBase, 0);
+                //vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, 0, mesh.indexBase, 0);
+                vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, mesh.indexBase, 0, 0);
+
             }
 
             vkCmdEndRenderPass(m_command_buffers.shadow[i]);

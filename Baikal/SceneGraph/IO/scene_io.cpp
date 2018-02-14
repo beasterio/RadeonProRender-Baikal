@@ -207,7 +207,6 @@ namespace Baikal
         {
             // Translate material
             materials[i] = TranslateMaterial(*image_io, objmaterials[i], basepath, *scene);
-
             // Add to emissive subset if needed
             if (materials[i]->HasEmission())
             {
@@ -295,7 +294,7 @@ namespace Baikal
         light1->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
         light1->SetEmittedRadiance(5.f * RadeonRays::float3(1.f, 0.8f, 0.65f));
 
-        //scene->AttachLight(light);
+        scene->AttachLight(light);
         scene->AttachLight(light1);
         scene->AttachLight(ibl);
 
