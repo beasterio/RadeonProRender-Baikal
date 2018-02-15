@@ -106,8 +106,7 @@ namespace Baikal
                 if (!res.textures->present(name))
                 {
                     RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
-                    color = { color.z, color.y, 1.f, 1.f };
-                    //color = { color.z, color.y, color.x, 1.f };
+                    color = { color.z, color.y, color.x, 1.f };
                     int w = 1;
                     int h = 1;
                     VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
