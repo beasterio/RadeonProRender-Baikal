@@ -27,12 +27,14 @@ namespace Baikal
     {
         bool valid = false;
         Baikal::SingleBxdf* single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(mat.get());
+        Baikal::MultiBxdf* multi_bxdf = dynamic_cast<Baikal::MultiBxdf*>(mat.get());
+        if (multi_bxdf) single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(multi_bxdf->GetInputValue("base_material").mat_value.get());
         if (!single_bxdf)
         {
             return false;
         }
 
-        auto input_value = mat->GetInputValue(input_name);
+        auto input_value = single_bxdf->GetInputValue(input_name);
         switch (input_value.type)
         {
         case Baikal::Material::InputType::kTexture:
@@ -59,6 +61,9 @@ namespace Baikal
         VkQueue queue;
         vkGetDeviceQueue(device->logicalDevice, device->queueFamilyIndices.graphics, 0, &queue);
         Baikal::SingleBxdf* single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(mat.get());
+        Baikal::MultiBxdf* multi_bxdf = dynamic_cast<Baikal::MultiBxdf*>(mat.get());
+        if (multi_bxdf) single_bxdf = dynamic_cast<Baikal::SingleBxdf*>(multi_bxdf->GetInputValue("base_material").mat_value.get());
+
         //get diffuse tex
         if (single_bxdf)
         {
@@ -101,7 +106,7 @@ namespace Baikal
                 if (!res.textures->present(name))
                 {
                     RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
-                    color = { color.z, color.y, color.x, 1.f };
+                    color = { color.z, color.y, 1.f, 1.f };
                     //color = { color.z, color.y, color.x, 1.f };
                     int w = 1;
                     int h = 1;
@@ -115,12 +120,13 @@ namespace Baikal
                 throw std::runtime_error("Error: unexpected input type.");
             }
         }
+        //complicated material
         else
         {
             std::string name = mat->GetName() + "_" + input_name + "_" + "kFloat4";
             if (!res.textures->present(name))
             {
-                RadeonRays::float4 color = { 1, 0, 0, 1.f };
+                RadeonRays::float4 color = { 0.f, 0.f, 1.f, 1.f };
                 int w = 1;
                 int h = 1;
                 VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
