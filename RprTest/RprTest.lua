@@ -10,11 +10,16 @@ project "RprTest"
             "RprLoadStore64"}
     files { "../RprTest/**.h", "../RprTest/**.cpp", "../RprTest/**.cl", "../RprTest/**.fsh", "../RprTest/**.vsh" }
 
-    includedirs{ "../Rpr",
-                 ".", 
-                 "../3rdParty/RprLoadStore/include",
-                 "../3rdParty/RprSupport/include",
-                 "../3rdParty/ProRenderGLTF/include" }
+    includedirs{"../Rpr",
+                ".", 
+                "../3rdParty/RprLoadStore/include",
+                "../3rdParty/RprSupport/include",
+                "../3rdparty/radeonrays-next/radeonrays/inc",
+                "../3rdparty/glm",
+                "../3rdparty/gli",
+                "../3rdparty",
+                "../3rdparty/assimp",
+                "../3rdParty/ProRenderGLTF/include" }
 
     if os.is("macosx") then
         sysincludedirs {"/usr/local/include"}
@@ -33,12 +38,18 @@ project "RprTest"
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/ProRenderGLTF/lib/%{cfg.platform}",
                     "../3rdparty/RprLoadStore/lib/%{cfg.platform}",
-                    "../3rdparty/RprSupport/lib/%{cfg.platform}" }
+                    "../3rdparty/RprSupport/lib/%{cfg.platform}",
+                    "../3rdparty/vulkan/lib/",
+                     }
         configuration {"Debug"}
             links {"OpenImageIOD"}
         configuration {"Release"}
             links {"OpenImageIO"}
         configuration {}
+
+        
+        defines{"VK_USE_PLATFORM_WIN32_KHR",
+                "NOMINMAX"}
     end
 
     if os.is("linux") then

@@ -1,10 +1,25 @@
 project "RadeonProRender"
     kind "SharedLib"
     location "../Rpr"
-    links {"RadeonRays", "CLW", "Calc"}
-    files { "../Rpr/**.h", "../Rpr/**.cpp", "../Baikal/**.h", "../Baikal/**.cpp", "../BaikalStandalone/Utils/config_manager.cpp", "../BaikalStandalone/Utils/config_manager.h" }
+    links {"RadeonRays",
+            "CLW",
+            "Calc",
+            "vulkan-1",
+            "Baikal"}
+    files { "../Rpr/**.h", "../Rpr/**.cpp",
+            --"../Baikal/**.h", "../Baikal/**.cpp", 
+            "../BaikalStandalone/Utils/config_manager.cpp", "../BaikalStandalone/Utils/config_manager.h" }
     removefiles{"../Baikal/main.cpp","../Baikal/main_benchmark.cpp", "../Baikal/ImGUI/imgui_impl_glfw_gl3.cpp"}
-    includedirs{ "../RadeonRays/RadeonRays/include", "../RadeonRays/CLW", "../Baikal", "../BaikalStandalone", "." }
+    includedirs{    "../RadeonRays/RadeonRays/include", 
+                    "../RadeonRays/CLW", 
+                    "../Baikal", 
+                    "../BaikalStandalone", 
+                    "../3rdparty",
+                    "../3rdparty/radeonrays-next/radeonrays/inc",
+                    "../3rdparty/glm",
+                    "../3rdparty/gli",
+                    "../3rdparty/assimp",
+                    "." }
 
     defines {"RPR_EXPORT_API"}
 
@@ -26,13 +41,17 @@ project "RadeonProRender"
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
-                    "../3rdparty/oiio/lib/%{cfg.platform}"}
+                    "../3rdparty/oiio/lib/%{cfg.platform}",
+                    "../3rdparty/vulkan/lib/",}
 
         configuration {"Debug"}
             links {"OpenImageIOD"}
         configuration {"Release"}
             links {"OpenImageIO"}
         configuration {}
+
+        defines{"VK_USE_PLATFORM_WIN32_KHR",
+                "NOMINMAX"}
     end
 
     if os.is("linux") then

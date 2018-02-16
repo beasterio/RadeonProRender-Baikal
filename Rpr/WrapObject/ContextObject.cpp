@@ -95,11 +95,11 @@ namespace
     { RPR_CONTEXT_CPU_NAME,{ "cpuname", "Name of the CPU in context. Constant value.", RPR_PARAMETER_TYPE_STRING } },
     };
 
-    std::map<uint32_t, Baikal::Renderer::OutputType> kOutputTypeMap = { {RPR_AOV_COLOR, Baikal::Renderer::OutputType::kColor},
-                                                                        {RPR_AOV_GEOMETRIC_NORMAL, Baikal::Renderer::OutputType::kWorldGeometricNormal},
-                                                                        {RPR_AOV_SHADING_NORMAL, Baikal::Renderer::OutputType::kWorldShadingNormal},
-                                                                        {RPR_AOV_UV, Baikal::Renderer::OutputType::kUv},
-                                                                        {RPR_AOV_WORLD_COORDINATE, Baikal::Renderer::OutputType::kWorldPosition}, 
+    std::map<uint32_t, Baikal::OutputType> kOutputTypeMap = { {RPR_AOV_COLOR, Baikal::OutputType::kColor},
+                                                                        {RPR_AOV_GEOMETRIC_NORMAL, Baikal::OutputType::kWorldGeometricNormal},
+                                                                        {RPR_AOV_SHADING_NORMAL, Baikal::OutputType::kWorldShadingNormal},
+                                                                        {RPR_AOV_UV, Baikal::OutputType::kUv},
+                                                                        {RPR_AOV_WORLD_COORDINATE, Baikal::OutputType::kWorldPosition}, 
                                                                         };
 
 }// anonymous
