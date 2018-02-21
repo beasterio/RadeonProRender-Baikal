@@ -73,7 +73,7 @@ namespace Baikal
             case Baikal::Material::InputType::kTexture:
             {
                 Texture::Ptr tex = input_value.tex_value;
-                std::string name = input_value.tex_value->GetName();
+                std::string name = input_value.tex_value->GetName() + "_" + std::to_string((std::uintptr_t)tex.get());
                 if (!res.textures->present(name))
                 {
                     int w = tex->GetSize().x;
@@ -102,11 +102,14 @@ namespace Baikal
             }
             case Baikal::Material::InputType::kFloat4:
             {
-                std::string name = mat->GetName() + "_" + input_name + "_" +"kFloat4";
+                RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
+                color = { color.z, color.y, color.x, 1.f };
+                std::string name = mat->GetName() + "_" + input_name + "_" + "kFloat4"  + std::to_string(color.x)
+                                                                                        + std::to_string(color.y)
+                                                                                        + std::to_string(color.z);
+
                 if (!res.textures->present(name))
                 {
-                    RadeonRays::float4 color = input_value.float_value;// color /= 255.f;
-                    color = { color.z, color.y, color.x, 1.f };
                     int w = 1;
                     int h = 1;
                     VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
@@ -203,7 +206,17 @@ namespace Baikal
         auto mesh_iter = scene.CreateShapeIterator();
         for (int i = 0; mesh_iter->IsValid(); mesh_iter->Next(), ++i)
         {
-            Baikal::Mesh::Ptr mesh = mesh_iter->ItemAs<Baikal::Mesh>();
+            Baikal::Shape::Ptr shape = mesh_iter->ItemAs<Baikal::Shape>();
+
+            Baikal::Mesh const* mesh = dynamic_cast<Baikal::Mesh*>(shape.get());
+
+            //handle instance case
+            Baikal::Instance const* inst = dynamic_cast<Baikal::Instance*>(shape.get());
+            if (inst)
+            {
+                mesh = dynamic_cast<Baikal::Mesh*>(inst->GetBaseShape().get());
+                continue;
+            }
             auto& raytraceShape = out.raytrace_shapes[i];
             raytraceShape.materialIndex = mat_collector.GetItemIndex(mesh->GetMaterial());
             raytraceShape.numTriangles = mesh->GetNumIndices() / 3;

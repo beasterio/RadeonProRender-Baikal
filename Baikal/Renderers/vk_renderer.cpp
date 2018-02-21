@@ -296,7 +296,7 @@ namespace Baikal
             //VkSemaphore waitSemaphores[] = { m_shadow_semaphore, m_offscreen_semaphore};
             // Scene rendering
             submit_info.pWaitSemaphores = waitSemaphores;
-            submit_info.waitSemaphoreCount = 3;
+            submit_info.waitSemaphoreCount = sizeof(waitSemaphores) / sizeof(VkSemaphore);
             //submit_info.pWaitSemaphores = waitSemaphores;
             //submit_info.waitSemaphoreCount = 2;
             

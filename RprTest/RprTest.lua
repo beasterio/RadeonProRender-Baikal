@@ -7,11 +7,14 @@ project "RprTest"
             "RadeonProRender", 
             "ProRenderGLTF", 
             "RprSupport64", 
-            "RprLoadStore64"}
+            "RprLoadStore64",
+            "Baikal"}
     files { "../RprTest/**.h", "../RprTest/**.cpp", "../RprTest/**.cl", "../RprTest/**.fsh", "../RprTest/**.vsh" }
 
     includedirs{"../Rpr",
+                "../Baikal",
                 ".", 
+                "../RadeonRays/RadeonRays/include",
                 "../3rdParty/RprLoadStore/include",
                 "../3rdParty/RprSupport/include",
                 "../3rdparty/radeonrays-next/radeonrays/inc",
@@ -47,7 +50,7 @@ project "RprTest"
             links {"OpenImageIO"}
         configuration {}
 
-        
+
         defines{"VK_USE_PLATFORM_WIN32_KHR",
                 "NOMINMAX"}
     end

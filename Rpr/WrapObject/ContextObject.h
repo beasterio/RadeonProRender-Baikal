@@ -87,7 +87,8 @@ private:
     void PostRender();
 
     //render configs
-    std::vector<ConfigManager::Config> m_cfgs;
+    //std::vector<ConfigManager::Config> m_cfgs;
+    std::vector<ConfigManager::VkConfig> m_cfgs;
     //know framefubbers used as AOV outputs
     std::set<FramebufferObject*> m_output_framebuffers;
     SceneObject* m_current_scene;

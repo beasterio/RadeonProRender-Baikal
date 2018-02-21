@@ -3,6 +3,7 @@
 #include "../RadeonRays/RadeonRays/include/math/mathutils.h"
 #include "RprLoadStore.h"
 #include "ProRenderGLTF.h"
+#include "load_obj_test.h"
 
 #include <map>
 #include <cassert>
@@ -3968,28 +3969,29 @@ void EnvironmentOverrideTest()
 
 int main(int argc, char* argv[])
 {
-    MeshCreationTest();
-    SimpleRenderTest();
-    ComplexRenderTest();
-    EnvLightClearTest();
-    MemoryStatistics();
-    DefaultMaterialTest();
-    NullShaderTest();
-    TiledRender();
-    AOVTest();
-    test_feature_cameraDOF();
-    test_feature_ContextImageFromData();
+    //MeshCreationTest();
+    //SimpleRenderTest();
+    //ComplexRenderTest();
+    //EnvLightClearTest();
+    //MemoryStatistics();
+    //DefaultMaterialTest();
+    //NullShaderTest();
+    //TiledRender();
+    //AOVTest();
+    //test_feature_cameraDOF();
+    //test_feature_ContextImageFromData();
 
-    test_feature_LightDirectional();
-    InstancingTest();
-    BumpmapTest();
-    test_feature_shaderBumpmap();
-    test_feature_shaderTypeLayered();
-    UpdateMaterial();
-    ArithmeticMul();
-    OrthoRenderTest();
-    BackgroundImageTest();
-    EnvironmentOverrideTest();
+    //test_feature_LightDirectional();
+    //InstancingTest();
+    //BumpmapTest();
+    //test_feature_shaderBumpmap();
+    //test_feature_shaderTypeLayered();
+    //UpdateMaterial();
+    //ArithmeticMul();
+    //OrthoRenderTest();
+    //BackgroundImageTest();
+    //EnvironmentOverrideTest();
+    LoadObjTest("../Resources/Sponza", "sponza_pbr.obj");
 
     return 0;
 }

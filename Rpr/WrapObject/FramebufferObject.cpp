@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "WrapObject/FramebufferObject.h"
 #include "WrapObject/Exception.h"
 #include "Output/clwoutput.h"
+#include "Output/vkoutput.h"
 #include "OpenImageIO/imageio.h"
 #include "RadeonProRender.h"
 #include "RadeonProRender_GL.h"
@@ -44,6 +45,7 @@ FramebufferObject::FramebufferObject(CLWContext context, CLWKernel copy_kernel, 
     , m_context(context)
     , m_copy_cernel(copy_kernel)
 {
+    Exception(RPR_ERROR_INTERNAL_ERROR, "No opengl interop for vulkan.");
     if (target != GL_TEXTURE_2D)
     {
         throw Exception(RPR_ERROR_INTERNAL_ERROR, "Unsupported GL texture target.");
@@ -85,8 +87,17 @@ void FramebufferObject::GetData(void* out_data)
 
 void FramebufferObject::Clear()
 {
-    Baikal::ClwOutput* output = dynamic_cast<Baikal::ClwOutput*>(m_output);
-    output->Clear(RadeonRays::float3(0.f, 0.f, 0.f, 0.f));
+    Baikal::ClwOutput* clwoutput = dynamic_cast<Baikal::ClwOutput*>(m_output);
+    Baikal::VkOutput* vkoutput = dynamic_cast<Baikal::VkOutput*>(m_output);
+    if (clwoutput)
+    {
+        clwoutput->Clear(RadeonRays::float3(0.f, 0.f, 0.f, 0.f));
+    }
+
+    if (!clwoutput && !vkoutput)
+    {
+        throw Exception(RPR_ERROR_INTERNAL_ERROR, "invalid output.");
+    }
 }
 
 void FramebufferObject::UpdateGlTex()
@@ -129,13 +140,15 @@ void FramebufferObject::SaveToFile(const char* path)
     {
         for (auto x = 0; x < width; ++x)
         {
+            //float gamma = 2.2f;
+            float gamma = 1.f;
 
             RadeonRays::float3 val = data[(height - 1 - y) * width + x];
             tempbuf[y * width + x] = (1.f / val.w) * val;
 
-            tempbuf[y * width + x].x = std::pow(tempbuf[y * width + x].x, 1.f / 2.2f);
-            tempbuf[y * width + x].y = std::pow(tempbuf[y * width + x].y, 1.f / 2.2f);
-            tempbuf[y * width + x].z = std::pow(tempbuf[y * width + x].z, 1.f / 2.2f);
+            tempbuf[y * width + x].x = std::pow(tempbuf[y * width + x].x, 1.f / gamma);
+            tempbuf[y * width + x].y = std::pow(tempbuf[y * width + x].y, 1.f / gamma);
+            tempbuf[y * width + x].z = std::pow(tempbuf[y * width + x].z, 1.f / gamma);
         }
     }
 

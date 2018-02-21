@@ -312,19 +312,22 @@ FramebufferObject* ContextObject::CreateFrameBuffer(rpr_framebuffer_format const
 
 FramebufferObject* ContextObject::CreateFrameBufferFromGLTexture(rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture)
 {
-    //TODO:: implement for several devices
-    if (m_cfgs.size() != 1)
-    {
-        throw Exception(RPR_ERROR_INTERNAL_ERROR, "ContextObject: invalid config count.");
-    }
-    auto& c = m_cfgs[0];
-    auto copykernel = static_cast<Baikal::MonteCarloRenderer*>(c.renderer.get())->GetCopyKernel();
-    FramebufferObject* result = new FramebufferObject(c.context, copykernel, target, miplevel, texture);
-    int w = result->Width();
-    int h = result->Height();
-    Baikal::Output* out = c.factory->CreateOutput(w, h).release();
-    result->SetOutput(out);
-    return result;
+    ////TODO:: implement for several devices
+    //if (m_cfgs.size() != 1)
+    //{
+    //    throw Exception(RPR_ERROR_INTERNAL_ERROR, "ContextObject: invalid config count.");
+    //}
+    //auto& c = m_cfgs[0];
+    //auto copykernel = static_cast<Baikal::MonteCarloRenderer*>(c.renderer.get())->GetCopyKernel();
+    //FramebufferObject* result = new FramebufferObject(c.context, copykernel, target, miplevel, texture);
+    //int w = result->Width();
+    //int h = result->Height();
+    //Baikal::Output* out = c.factory->CreateOutput(w, h).release();
+    //result->SetOutput(out);
+    //return result;
+
+    throw Exception(RPR_ERROR_INVALID_TAG, "ContextObject: no opengl interop for vulkan.");
+    return nullptr;
 }
 
 
