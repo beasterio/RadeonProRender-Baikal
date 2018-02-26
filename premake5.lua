@@ -88,6 +88,9 @@ if _OPTIONS["rpr"] then
     if fileExists("./RprTest/RprTest.lua") then
         dofile("./RprTest/RprTest.lua")
     end
+    if fileExists("./RprDemo/RprDemo.lua") then
+        dofile("./RprDemo/RprDemo.lua")
+    end
 end
 
 if fileExists("./Baikal/Baikal.lua") then
