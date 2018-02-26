@@ -263,6 +263,8 @@ namespace Baikal
         vks::Buffer raytrace_material_buffer;
         vks::Buffer raytrace_RNG_buffer;
         vks::Buffer raytrace_vertex_buffer;
+        vks::Buffer mesh_transform_buf;
+        size_t transform_alignment;
 
         std::vector<Vertex> vertices;
         std::vector<RaytraceVertex> raytrace_vertices;

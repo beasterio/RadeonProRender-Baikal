@@ -18,6 +18,11 @@ layout (binding = 0) uniform UBO
     vec4 cameraPosition;
 } ubo;
 
+layout (binding = 5) uniform UboShape 
+{
+    mat4 model; 
+} uboShape;
+
 layout (location = 0) out vec3 outNormal;
 layout (location = 1) out vec2 outUV;
 layout (location = 2) out vec3 outColor;
@@ -33,11 +38,11 @@ out gl_PerVertex
 
 void main() 
 {
-    vec4 position_ps = ubo.projection * ubo.view * inPos;
+    vec4 position_ps = ubo.projection * ubo.view * uboShape.model * inPos;
     vec3 position_cs = position_ps.xyz / position_ps.w;
     vec2 position_ss = position_cs.xy * vec2(0.5f, -0.5f) + vec2(0.5f, 0.5f);
     
-    vec4 prev_position_ps = ubo.prevViewProjection * inPos;
+    vec4 prev_position_ps = ubo.prevViewProjection * uboShape.model * inPos;
     vec2 prev_position_cs = prev_position_ps.xy / prev_position_ps.w;
     vec2 prev_position_ss = prev_position_cs * vec2(0.5f, -0.5f) + vec2(0.5f, 0.5f);
 
@@ -47,10 +52,10 @@ void main()
     outUV.t = 1.0 - outUV.t;
 
     // Vertex position in world space
-    outWorldPos = vec3(ubo.view * inPos);
+    outWorldPos = vec3(ubo.view * uboShape.model * inPos);
 
     // Normal in world space
-    mat3 mNormal = mat3(ubo.view);
+    mat3 mNormal = mat3(ubo.view * uboShape.model);
     outNormal = mNormal * normalize(inNormal);	
     outTangent = mNormal * normalize(inTangent);
     

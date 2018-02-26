@@ -258,5 +258,8 @@ void main()
     float giWeight = 1.0;//frameCount < 64.0 ? (frameCount / 64.0) : 1.0;
     fragcolor += giWeight * ao * (gi + realAlbedo * 0.05);
     
-    outFragColor = vec4(pow(fragcolor.xyzz, vec4(1.0f / 2.2f)).xyz, 1.0f);
+    outFragColor = clamp(vec4(pow(fragcolor.xyzz, vec4(1.0f / 2.2f)).xyz, 1.0f), 0.f, 1.f);
+    //outFragColor = vec4(fragcolor, 1.f);
+    //outFragColor = vec4(gi, 1.f);
+    //outFragColor = vec4(0.f, 0.f, ao, 1.f);
 } 

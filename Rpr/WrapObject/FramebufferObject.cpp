@@ -29,9 +29,11 @@ THE SOFTWARE.
 #include "RadeonProRender_GL.h"
 #include "GL/glew.h"
 #include "Renderers/monte_carlo_renderer.h"
+#include "ContextObject.h"
 
-FramebufferObject::FramebufferObject(Baikal::Output* out)
-    : m_output(out)
+FramebufferObject::FramebufferObject(ContextObject* context, Baikal::Output* out)
+    : m_context_obj(context)
+    , m_output(out)
     , m_width(out->width())
     , m_height(out->height())
 {
@@ -44,6 +46,7 @@ FramebufferObject::FramebufferObject(CLWContext context, CLWKernel copy_kernel, 
     , m_height(0)
     , m_context(context)
     , m_copy_cernel(copy_kernel)
+    , m_context_obj(nullptr)
 {
     Exception(RPR_ERROR_INTERNAL_ERROR, "No opengl interop for vulkan.");
     if (target != GL_TEXTURE_2D)
@@ -87,17 +90,7 @@ void FramebufferObject::GetData(void* out_data)
 
 void FramebufferObject::Clear()
 {
-    Baikal::ClwOutput* clwoutput = dynamic_cast<Baikal::ClwOutput*>(m_output);
-    Baikal::VkOutput* vkoutput = dynamic_cast<Baikal::VkOutput*>(m_output);
-    if (clwoutput)
-    {
-        clwoutput->Clear(RadeonRays::float3(0.f, 0.f, 0.f, 0.f));
-    }
-
-    if (!clwoutput && !vkoutput)
-    {
-        throw Exception(RPR_ERROR_INTERNAL_ERROR, "invalid output.");
-    }
+    m_context_obj->ClearFb(this);
 }
 
 void FramebufferObject::UpdateGlTex()

@@ -3969,15 +3969,15 @@ void EnvironmentOverrideTest()
 
 int main(int argc, char* argv[])
 {
-    //MeshCreationTest();
-    //SimpleRenderTest();
-    //ComplexRenderTest();
+    MeshCreationTest();
+    SimpleRenderTest();
+    ComplexRenderTest();
     //EnvLightClearTest();
     //MemoryStatistics();
-    //DefaultMaterialTest();
+    DefaultMaterialTest();
     //NullShaderTest();
-    //TiledRender();
-    //AOVTest();
+    TiledRender();
+    AOVTest();
     //test_feature_cameraDOF();
     //test_feature_ContextImageFromData();
 
@@ -3988,10 +3988,10 @@ int main(int argc, char* argv[])
     //test_feature_shaderTypeLayered();
     //UpdateMaterial();
     //ArithmeticMul();
-    //OrthoRenderTest();
+    OrthoRenderTest();
     //BackgroundImageTest();
     //EnvironmentOverrideTest();
-    LoadObjTest("../Resources/Sponza", "sponza_pbr.obj");
+    //LoadObjTest("../Resources/Sponza", "sponza_pbr.obj");
 
     return 0;
 }

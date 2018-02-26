@@ -26,12 +26,14 @@ THE SOFTWARE.
 #include "Renderers/renderer.h"
 #include "RadeonProRender_GL.h"
 
+class ContextObject;
+
 //this class represent rpr_context
 class FramebufferObject
     : public WrapObject
 {
 public:
-    FramebufferObject(Baikal::Output* out);
+    FramebufferObject(ContextObject* context, Baikal::Output* out);
     FramebufferObject(CLWContext context, CLWKernel copy_cernel, rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture);
     virtual ~FramebufferObject();
 
@@ -53,6 +55,7 @@ public:
     void UpdateGlTex();
     Baikal::Output* GetOutput() { return m_output; }
 private:
+    ContextObject* m_context_obj;
     Baikal::Output* m_output;
     int m_width;
     int m_height;

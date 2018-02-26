@@ -306,7 +306,7 @@ FramebufferObject* ContextObject::CreateFrameBuffer(rpr_framebuffer_format const
     }
     auto& c = m_cfgs[0];
     Baikal::Output* out = c.factory->CreateOutput(in_fb_desc->fb_width, in_fb_desc->fb_height).release();
-    FramebufferObject* result = new FramebufferObject(out);
+    FramebufferObject* result = new FramebufferObject(this, out);
     return result;
 }
 
@@ -328,6 +328,15 @@ FramebufferObject* ContextObject::CreateFrameBufferFromGLTexture(rpr_GLenum targ
 
     throw Exception(RPR_ERROR_INVALID_TAG, "ContextObject: no opengl interop for vulkan.");
     return nullptr;
+}
+
+void ContextObject::ClearFb(FramebufferObject* fb)
+{
+    Baikal::Output* output = fb->GetOutput();
+    for (auto& c : m_cfgs)
+    {
+        c.renderer->Clear(RadeonRays::float3(0.f, 0.f, 0.f), *output);
+    }
 }
 
 

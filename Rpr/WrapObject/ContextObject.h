@@ -80,6 +80,8 @@ public:
     CameraObject* CreateCamera();
     FramebufferObject* CreateFrameBuffer(rpr_framebuffer_format const in_format, rpr_framebuffer_desc const * in_fb_desc);
     FramebufferObject* CreateFrameBufferFromGLTexture(rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture);
+
+    void ClearFb(FramebufferObject* fb);
 private:
     void PrepareScene();
 

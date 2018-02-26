@@ -787,7 +787,8 @@ namespace Baikal
             pushConsts.baseRoughness = mesh.material->baseRoughness;
             pushConsts.baseMetallic = mesh.material->baseMetallic;
 
-            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
+            uint32_t offset = pushConsts.meshID[0] * static_cast<uint32_t>(scene->transform_alignment);
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 1, &offset);
             vkCmdPushConstants(cmdBuffer, scene->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConsts), &pushConsts);
             //vkCmdDrawIndexed(cmdBuffer, mesh.indexCount, 1, 0, mesh.indexBase, 0);
             vkCmdDrawIndexed(cmdBuffer, mesh.indexCount, 1, mesh.indexBase, 0, 0);
@@ -810,7 +811,7 @@ namespace Baikal
         VkPipelineRasterizationStateCreateInfo rasterizationState =
             vks::initializers::pipelineRasterizationStateCreateInfo(
                 VK_POLYGON_MODE_FILL,
-                VK_CULL_MODE_BACK_BIT,
+                VK_CULL_MODE_NONE,
                 VK_FRONT_FACE_CLOCKWISE,
                 0);
 

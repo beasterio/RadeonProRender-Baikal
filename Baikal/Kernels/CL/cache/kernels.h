@@ -37,11 +37,15 @@ static const char g_bxdf_opencl[]= \
 "    kDiffuse = (1 << 2), \n"\
 "    kSpecular = (1 << 3), \n"\
 "    kGlossy = (1 << 4), \n"\
+"    kTransparency = (1 << 5), \n"\
 "    kAllReflection = kReflection | kDiffuse | kSpecular | kGlossy, \n"\
+"    kGlossyReflection = kReflection | kSpecular | kGlossy, \n"\
+"    kSpecularReflection = kReflection | kSpecular, \n"\
 "    kAllTransmission = kTransmission | kDiffuse | kSpecular | kGlossy, \n"\
+"    kGlossyTransmission = kTransmission | kSpecular | kGlossy, \n"\
+"    kSpecularTransmission = kTransmission | kSpecular, \n"\
 "    kAll = kReflection | kTransmission | kDiffuse | kSpecular | kGlossy \n"\
 "}; \n"\
-" \n"\
 " \n"\
 "/// Schlick's approximation of Fresnel equtions \n"\
 "float SchlickFresnel(float eta, float ndotw) \n"\
@@ -1189,6 +1193,21 @@ static const char g_bxdf_opencl[]= \
 "{ \n"\
 "    return dg->mat.type == kIdealRefract || dg->mat.type == kPassthrough || dg->mat.type == kTranslucent || \n"\
 "        dg->mat.type == kMicrofacetRefractionGGX || dg->mat.type == kMicrofacetRefractionBeckmann; \n"\
+"} \n"\
+" \n"\
+"bool Bxdf_IsRefraction(DifferentialGeometry const* dg) \n"\
+"{ \n"\
+"    return dg->mat.type == kIdealRefract || dg->mat.type == kMicrofacetRefractionGGX || dg->mat.type == kMicrofacetRefractionBeckmann; \n"\
+"} \n"\
+" \n"\
+"bool Bxdf_IsReflection(DifferentialGeometry const* dg) \n"\
+"{ \n"\
+"    return dg->mat.type == kIdealReflect || dg->mat.type == kMicrofacetGGX || dg->mat.type == kMicrofacetBeckmann;; \n"\
+"} \n"\
+" \n"\
+"bool Bxdf_IsTransparency(DifferentialGeometry const* dg) \n"\
+"{ \n"\
+"    return dg->mat.type == kPassthrough; \n"\
 "} \n"\
 " \n"\
 "#endif // BXDF_CL \n"\
@@ -2831,6 +2850,27 @@ static const char g_light_opencl[]= \
 "    } \n"\
 "} \n"\
 " \n"\
+"INLINE int EnvironmentLight_GetTexture(Light const* light, int surface_interaction_flags) \n"\
+"{ \n"\
+"    int tex = light->tex; \n"\
+" \n"\
+"    if ((surface_interaction_flags & kReflection) && light->tex_reflection != -1) \n"\
+"        tex = light->tex_reflection; \n"\
+" \n"\
+"    if ((surface_interaction_flags & kTransmission) && light->tex_refraction != -1) \n"\
+"        tex = light->tex_refraction; \n"\
+" \n"\
+"    if ((surface_interaction_flags & kTransparency) && light->tex_transparency != -1) \n"\
+"        tex = light->tex_transparency; \n"\
+" \n"\
+"    return tex; \n"\
+"} \n"\
+" \n"\
+"INLINE int EnvironmentLight_GetBackgroundTexture(Light const* light) \n"\
+"{ \n"\
+"    return light->tex_background == -1 ? light->tex : light->tex_background; \n"\
+"} \n"\
+" \n"\
 "/* \n"\
 " Environment light \n"\
 " */ \n"\
@@ -2841,6 +2881,8 @@ static const char g_light_opencl[]= \
 "                              Scene const* scene, \n"\
 "                              // Geometry \n"\
 "                              DifferentialGeometry const* dg, \n"\
+"                              // Path flags \n"\
+"                              int surface_interaction_flags, \n"\
 "                              // Direction to light source \n"\
 "                              float3* wo, \n"\
 "                              // Textures \n"\
@@ -2849,8 +2891,16 @@ static const char g_light_opencl[]= \
 "{ \n"\
 "    // Sample envmap \n"\
 "    *wo *= 100000.f; \n"\
-"    // \n"\
-"    return light->multiplier * Texture_SampleEnvMap(normalize(*wo), TEXTURE_ARGS_IDX(light->tex)); \n"\
+" \n"\
+"    int tex = EnvironmentLight_GetTexture(light, surface_interaction_flags); \n"\
+" \n"\
+" \n"\
+"    if (tex == -1) \n"\
+"    { \n"\
+"        return 0.f; \n"\
+"    } \n"\
+" \n"\
+"    return light->multiplier * Texture_SampleEnvMap(normalize(*wo), TEXTURE_ARGS_IDX(tex)); \n"\
 "} \n"\
 " \n"\
 "/// Sample direction to the light \n"\
@@ -2864,6 +2914,8 @@ static const char g_light_opencl[]= \
 "                               TEXTURE_ARG_LIST, \n"\
 "                               // Sample \n"\
 "                               float2 sample, \n"\
+"                               // Path flags \n"\
+"                               int surface_interaction_flags, \n"\
 "                               // Direction to light source \n"\
 "                               float3* wo, \n"\
 "                               // PDF \n"\
@@ -2878,8 +2930,16 @@ static const char g_light_opencl[]= \
 "    // Envmap PDF \n"\
 "    *pdf = 1.f / (2.f * PI); \n"\
 " \n"\
+"    int tex = EnvironmentLight_GetTexture(light, surface_interaction_flags); \n"\
+" \n"\
+"    if (tex == -1) \n"\
+"    { \n"\
+"        *pdf = 0.f; \n"\
+"        return 0.f; \n"\
+"    } \n"\
+" \n"\
 "    // Sample envmap \n"\
-"    return light->multiplier * Texture_SampleEnvMap(d, TEXTURE_ARGS_IDX(light->tex)); \n"\
+"    return light->multiplier * Texture_SampleEnvMap(d, TEXTURE_ARGS_IDX(tex)); \n"\
 "} \n"\
 " \n"\
 "/// Get PDF for a given direction \n"\
@@ -2890,6 +2950,8 @@ static const char g_light_opencl[]= \
 "                              Scene const* scene, \n"\
 "                              // Geometry \n"\
 "                              DifferentialGeometry const* dg, \n"\
+"                              // Path flags \n"\
+"                              int surface_interaction_flags, \n"\
 "                              // Direction to light source \n"\
 "                              float3 wo, \n"\
 "                              // Textures \n"\
@@ -3314,6 +3376,8 @@ static const char g_light_opencl[]= \
 "                   Scene const* scene, \n"\
 "                   // Geometry \n"\
 "                   DifferentialGeometry const* dg, \n"\
+"                    // Path flags \n"\
+"                    int surface_interaction_flags, \n"\
 "                   // Direction to light source \n"\
 "                   float3* wo, \n"\
 "                   // Textures \n"\
@@ -3325,7 +3389,7 @@ static const char g_light_opencl[]= \
 "    switch(light.type) \n"\
 "    { \n"\
 "        case kIbl: \n"\
-"            return EnvironmentLight_GetLe(&light, scene, dg, wo, TEXTURE_ARGS); \n"\
+"            return EnvironmentLight_GetLe(&light, scene, dg, surface_interaction_flags, wo, TEXTURE_ARGS); \n"\
 "        case kArea: \n"\
 "            return AreaLight_GetLe(&light, scene, dg, wo, TEXTURE_ARGS); \n"\
 "        case kDirectional: \n"\
@@ -3350,6 +3414,8 @@ static const char g_light_opencl[]= \
 "                    TEXTURE_ARG_LIST, \n"\
 "                    // Sample \n"\
 "                    float2 sample, \n"\
+"                    // Path flags \n"\
+"                    int surface_interaction_flags, \n"\
 "                    // Direction to light source \n"\
 "                    float3* wo, \n"\
 "                    // PDF \n"\
@@ -3360,7 +3426,7 @@ static const char g_light_opencl[]= \
 "    switch(light.type) \n"\
 "    { \n"\
 "        case kIbl: \n"\
-"            return EnvironmentLight_Sample(&light, scene, dg, TEXTURE_ARGS, sample, wo, pdf); \n"\
+"            return EnvironmentLight_Sample(&light, scene, dg, TEXTURE_ARGS, sample, surface_interaction_flags, wo, pdf); \n"\
 "        case kArea: \n"\
 "            return AreaLight_Sample(&light, scene, dg, TEXTURE_ARGS, sample, wo, pdf); \n"\
 "        case kDirectional: \n"\
@@ -3382,6 +3448,8 @@ static const char g_light_opencl[]= \
 "                   Scene const* scene, \n"\
 "                   // Geometry \n"\
 "                   DifferentialGeometry const* dg, \n"\
+"                    // Path flags \n"\
+"                    int surface_interaction_flags, \n"\
 "                   // Direction to light source \n"\
 "                   float3 wo, \n"\
 "                   // Textures \n"\
@@ -3393,7 +3461,7 @@ static const char g_light_opencl[]= \
 "    switch(light.type) \n"\
 "    { \n"\
 "        case kIbl: \n"\
-"            return EnvironmentLight_GetPdf(&light, scene, dg, wo, TEXTURE_ARGS); \n"\
+"            return EnvironmentLight_GetPdf(&light, scene, dg, surface_interaction_flags, wo, TEXTURE_ARGS); \n"\
 "        case kArea: \n"\
 "            return AreaLight_GetPdf(&light, scene, dg, wo, TEXTURE_ARGS); \n"\
 "        case kDirectional: \n"\
@@ -4301,6 +4369,10 @@ static const char g_monte_carlo_renderer_opencl[]= \
 "    int gloss_enabled, \n"\
 "    // Specularity map \n"\
 "    GLOBAL float4* restrict aov_gloss, \n"\
+"	// Mesh_id enabled flag \n"\
+"    int mesh_id_enabled, \n"\
+"	// Mesh_id AOV \n"\
+"    GLOBAL float4* restrict mesh_id, \n"\
 "    // Depth enabled flag \n"\
 "    int depth_enabled, \n"\
 "    // Depth map \n"\
@@ -4499,7 +4571,12 @@ static const char g_monte_carlo_renderer_opencl[]= \
 "                aov_gloss[idx].xyz += gloss; \n"\
 "                aov_gloss[idx].w += 1.f; \n"\
 "            } \n"\
-" \n"\
+"             \n"\
+"            if (mesh_id_enabled) \n"\
+"            { \n"\
+"                mesh_id[idx] = make_float4(isect.shapeid, isect.shapeid, isect.shapeid, 1.f); \n"\
+"            } \n"\
+"             \n"\
 "            if (depth_enabled) \n"\
 "            { \n"\
 "                float w = aov_depth[idx].w; \n"\
@@ -4774,6 +4851,51 @@ static const char g_monte_carlo_renderer_opencl[]= \
 "    } \n"\
 "} \n"\
 " \n"\
+"///< Illuminate missing rays \n"\
+"KERNEL void ShadeBackgroundImage( \n"\
+"    // Ray batch \n"\
+"    GLOBAL ray const* restrict rays, \n"\
+"    // Intersection data \n"\
+"    GLOBAL Intersection const* restrict isects, \n"\
+"    // Pixel indices \n"\
+"    GLOBAL int const* restrict pixel_indices, \n"\
+"    // Output indices \n"\
+"    GLOBAL int const*  restrict output_indices, \n"\
+"    // Number of rays \n"\
+"    int num_rays, \n"\
+"    int background_idx, \n"\
+"    // Output size \n"\
+"    int width, \n"\
+"    int height, \n"\
+"    // Textures \n"\
+"    TEXTURE_ARG_LIST, \n"\
+"    // Output values \n"\
+"    GLOBAL float4* restrict output \n"\
+") \n"\
+"{ \n"\
+"    int global_id = get_global_id(0); \n"\
+" \n"\
+"    if (global_id < num_rays) \n"\
+"    { \n"\
+"        int pixel_idx = pixel_indices[global_id]; \n"\
+"        int output_index = output_indices[pixel_idx]; \n"\
+" \n"\
+"        float x = (float)(output_index % width) / (float)width; \n"\
+"        float y = (float)(output_index / width) / (float)height; \n"\
+" \n"\
+"        float4 v = make_float4(0.f, 0.f, 0.f, 1.f); \n"\
+" \n"\
+"        // In case of a miss \n"\
+"        if (isects[global_id].shapeid < 0) \n"\
+"        { \n"\
+"            float2 uv = make_float2(x, y); \n"\
+"            v.xyz = Texture_Sample2D(uv, TEXTURE_ARGS_IDX(background_idx)).xyz; \n"\
+"        } \n"\
+"         \n"\
+"        ADD_FLOAT4(&output[output_index], v); \n"\
+"    } \n"\
+"} \n"\
+" \n"\
 " \n"\
 "#endif // MONTE_CARLO_RENDERER_CL \n"\
 ;
@@ -4889,83 +5011,110 @@ static const char g_path_opencl[]= \
 "{ \n"\
 "    kNone = 0x0, \n"\
 "    kKilled = 0x1, \n"\
-"    kScattered = 0x2, \n"\
-"    kSpecularBounce = 0x4 \n"\
+"    kScattered = 0x2 \n"\
 "} PathFlags; \n"\
 " \n"\
-"bool Path_IsScattered(__global Path const* path) \n"\
+"INLINE bool Path_IsScattered(__global Path const* path) \n"\
 "{ \n"\
 "    return path->flags & kScattered; \n"\
 "} \n"\
 " \n"\
-"bool Path_IsSpecular(__global Path const* path) \n"\
-"{ \n"\
-"    return path->flags & kSpecularBounce; \n"\
-"} \n"\
-" \n"\
-"bool Path_IsAlive(__global Path const* path) \n"\
+"INLINE bool Path_IsAlive(__global Path const* path) \n"\
 "{ \n"\
 "    return ((path->flags & kKilled) == 0); \n"\
 "} \n"\
 " \n"\
-"void Path_ClearScatterFlag(__global Path* path) \n"\
+"INLINE void Path_ClearScatterFlag(__global Path* path) \n"\
 "{ \n"\
 "    path->flags &= ~kScattered; \n"\
 "} \n"\
 " \n"\
-"void Path_SetScatterFlag(__global Path* path) \n"\
+"INLINE void Path_SetScatterFlag(__global Path* path) \n"\
 "{ \n"\
 "    path->flags |= kScattered; \n"\
 "} \n"\
 " \n"\
-" \n"\
-"void Path_ClearSpecularFlag(__global Path* path) \n"\
+"INLINE void Path_ClearSurfaceInteractionFlags(__global Path* path) \n"\
 "{ \n"\
-"    path->flags &= ~kSpecularBounce; \n"\
+"    path->flags &= (kKilled | kScattered); \n"\
 "} \n"\
 " \n"\
-"void Path_SetSpecularFlag(__global Path* path) \n"\
+"INLINE int Path_GetSurfaceInteractionFlags(__global Path const* path) \n"\
 "{ \n"\
-"    path->flags |= kSpecularBounce; \n"\
+"    return path->flags >> 2; \n"\
 "} \n"\
 " \n"\
-"void Path_Restart(__global Path* path) \n"\
+"INLINE int Path_SetSurfaceInteractionFlags(__global Path* path, int flags) \n"\
+"{ \n"\
+"    return path->flags |= (flags << 2); \n"\
+"} \n"\
+" \n"\
+"INLINE void Path_Restart(__global Path* path) \n"\
 "{ \n"\
 "    path->flags = 0; \n"\
 "} \n"\
 " \n"\
-"int Path_GetVolumeIdx(__global Path const* path) \n"\
+"INLINE int Path_GetVolumeIdx(__global Path const* path) \n"\
 "{ \n"\
 "    return path->volume; \n"\
 "} \n"\
 " \n"\
-"void Path_SetVolumeIdx(__global Path* path, int volume_idx) \n"\
+"INLINE void Path_SetVolumeIdx(__global Path* path, int volume_idx) \n"\
 "{ \n"\
 "    path->volume = volume_idx; \n"\
 "} \n"\
 " \n"\
-"float3 Path_GetThroughput(__global Path const* path) \n"\
+"INLINE float3 Path_GetThroughput(__global Path const* path) \n"\
 "{ \n"\
 "    float3 t = path->throughput; \n"\
 "    return t; \n"\
 "} \n"\
 " \n"\
-"void Path_MulThroughput(__global Path* path, float3 mul) \n"\
+"INLINE void Path_MulThroughput(__global Path* path, float3 mul) \n"\
 "{ \n"\
 "    path->throughput *= mul; \n"\
 "} \n"\
 " \n"\
-"void Path_Kill(__global Path* path) \n"\
+"INLINE void Path_Kill(__global Path* path) \n"\
 "{ \n"\
 "    path->flags |= kKilled; \n"\
 "} \n"\
 " \n"\
-"void Path_AddContribution(__global Path* path, __global float3* output, int idx, float3 val) \n"\
+"INLINE void Path_AddContribution(__global Path* path, __global float3* output, int idx, float3 val) \n"\
 "{ \n"\
 "    output[idx] += Path_GetThroughput(path) * val; \n"\
 "} \n"\
 " \n"\
+"INLINE bool Path_IsSpecular(__global Path const* path) \n"\
+"{ \n"\
+"    int flags = Path_GetSurfaceInteractionFlags(path); \n"\
+"    return flags & kSpecular; \n"\
+"} \n"\
 " \n"\
+"INLINE void Path_SetFlags(DifferentialGeometry* diffgeo, GLOBAL Path* restrict path) \n"\
+"{ \n"\
+"    Path_ClearSurfaceInteractionFlags(path); \n"\
+" \n"\
+"    if (Bxdf_IsSingular(diffgeo)) \n"\
+"    { \n"\
+"        Path_SetSurfaceInteractionFlags(path, kSpecular); \n"\
+"    } \n"\
+" \n"\
+"    if (Bxdf_IsRefraction(diffgeo)) \n"\
+"    { \n"\
+"        Path_SetSurfaceInteractionFlags(path, kTransmission); \n"\
+"    } \n"\
+" \n"\
+"    if (Bxdf_IsReflection(diffgeo)) \n"\
+"    { \n"\
+"        Path_SetSurfaceInteractionFlags(path, kReflection); \n"\
+"    } \n"\
+" \n"\
+"    if (Bxdf_IsTransparency(diffgeo)) \n"\
+"    { \n"\
+"        Path_SetSurfaceInteractionFlags(path, kTransparency); \n"\
+"    } \n"\
+"} \n"\
 " \n"\
 "#endif \n"\
 ;
@@ -5010,7 +5159,7 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        GLOBAL Path* my_path = paths + global_id; \n"\
 "        dst_index[global_id] = src_index[global_id]; \n"\
 " \n"\
-"        // Initalize path data \n"\
+"        // Initalize path data  \n"\
 "        my_path->throughput = make_float3(1.f, 1.f, 1.f); \n"\
 "        my_path->volume = INVALID_IDX; \n"\
 "        my_path->flags = 0; \n"\
@@ -5146,7 +5295,8 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        // since EvaluateVolume has put it there \n"\
 "        dg.p = o + wi * Intersection_GetDistance(isects + hit_idx); \n"\
 "        // Get light sample intencity \n"\
-"        float3 le = Light_Sample(light_idx, &scene, &dg, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &wo, &pdf); \n"\
+"        int surface_interaction_flags = Path_GetSurfaceInteractionFlags(path); \n"\
+"        float3 le = Light_Sample(light_idx, &scene, &dg, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), surface_interaction_flags, &wo, &pdf); \n"\
 " \n"\
 "        // Generate shadow ray \n"\
 "        float shadow_ray_length = length(wo); \n"\
@@ -5186,7 +5336,7 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        pdf = 1.f / (4.f * PI); \n"\
 " \n"\
 "        // Generate new path segment \n"\
-"        Ray_Init(indirect_rays + global_id, dg.p, normalize(wo), CRAZY_HIGH_DISTANCE, 0.f, 0xFFFFFFFF); \n"\
+"        Ray_Init(indirect_rays + global_id, dg.p, normalize(wo), CRAZY_HIGH_DISTANCE, 0.f, 0xFFFFFFFF);  \n"\
 " \n"\
 "        // Update path throughput multiplying by phase function. \n"\
 "        Path_MulThroughput(path, PhaseFunction_Uniform(wi, normalize(wo)) / pdf); \n"\
@@ -5198,6 +5348,7 @@ static const char g_path_tracing_estimator_opencl[]= \
 "#endif \n"\
 "    } \n"\
 "} \n"\
+" \n"\
 " \n"\
 "// Handle ray-surface interaction possibly generating path continuation.  \n"\
 "// This is only applied to non-scattered paths. \n"\
@@ -5317,7 +5468,9 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        bool backfacing = ngdotwi < 0.f; \n"\
 " \n"\
 "        // Select BxDF  \n"\
-"        Material_Select(&scene, wi, &sampler, TEXTURE_ARGS, SAMPLER_ARGS, &diffgeo);  \n"\
+"        Material_Select(&scene, wi, &sampler, TEXTURE_ARGS, SAMPLER_ARGS, &diffgeo); \n"\
+"        // Set surface interaction flags \n"\
+"        Path_SetFlags(&diffgeo, path); \n"\
 " \n"\
 "        // Terminate if emissive \n"\
 "        if (Bxdf_IsEmissive(&diffgeo)) \n"\
@@ -5350,7 +5503,6 @@ static const char g_path_tracing_estimator_opencl[]= \
 "            light_samples[global_id] = 0.f; \n"\
 "            return; \n"\
 "        } \n"\
-" \n"\
 " \n"\
 "        float s = Bxdf_IsBtdf(&diffgeo) ? (-sign(ngdotwi)) : 1.f; \n"\
 "        if (backfacing && !Bxdf_IsBtdf(&diffgeo)) \n"\
@@ -5394,7 +5546,7 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        float bxdf_weight = 1.f; \n"\
 "        float light_weight = 1.f; \n"\
 " \n"\
-"        int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf); \n"\
+"        int light_idx = Scene_SampleLight(&scene, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &selection_pdf);  \n"\
 " \n"\
 "        float3 throughput = Path_GetThroughput(path); \n"\
 " \n"\
@@ -5405,7 +5557,8 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        if (light_idx > -1)  \n"\
 "        { \n"\
 "            // Sample light \n"\
-"            float3 le = Light_Sample(light_idx, &scene, &diffgeo, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), &lightwo, &light_pdf); \n"\
+"            int surface_interaction_flags = Path_GetSurfaceInteractionFlags(path); \n"\
+"            float3 le = Light_Sample(light_idx, &scene, &diffgeo, TEXTURE_ARGS, Sampler_Sample2D(&sampler, SAMPLER_ARGS), surface_interaction_flags, &lightwo, &light_pdf); \n"\
 "            light_bxdf_pdf = Bxdf_GetPdf(&diffgeo, wi, normalize(lightwo), TEXTURE_ARGS); \n"\
 "            light_weight = Light_IsSingular(&scene.lights[light_idx]) ? 1.f : BalanceHeuristic(1, light_pdf * selection_pdf, 1, light_bxdf_pdf);  \n"\
 " \n"\
@@ -5459,15 +5612,6 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        if (rr_apply) \n"\
 "        { \n"\
 "            Path_MulThroughput(path, 1.f / q); \n"\
-"        } \n"\
-" \n"\
-"        if (Bxdf_IsSingular(&diffgeo)) \n"\
-"        { \n"\
-"            Path_SetSpecularFlag(path); \n"\
-"        } \n"\
-"        else \n"\
-"        { \n"\
-"            Path_ClearSpecularFlag(path); \n"\
 "        } \n"\
 " \n"\
 "        bxdfwo = normalize(bxdfwo); \n"\
@@ -5529,22 +5673,26 @@ static const char g_path_tracing_estimator_opencl[]= \
 "        float4 v = make_float4(0.f, 0.f, 0.f, 1.f); \n"\
 " \n"\
 "        // In case of a miss \n"\
-"        if (isects[global_id].shapeid < 0 && env_light_idx != -1) \n"\
+"        if (isects[global_id].shapeid < 0 && env_light_idx != -1)   \n"\
 "        { \n"\
 "            // Multiply by throughput \n"\
 "            int volume_idx = paths[pixel_idx].volume; \n"\
 " \n"\
 "            Light light = lights[env_light_idx]; \n"\
 " \n"\
+"            int tex = EnvironmentLight_GetBackgroundTexture(&light); \n"\
 " \n"\
-"            if (volume_idx == -1) \n"\
-"                v.xyz = light.multiplier * Texture_SampleEnvMap(rays[global_id].d.xyz, TEXTURE_ARGS_IDX(light.tex)); \n"\
-"            else \n"\
+"            if (tex != -1) \n"\
 "            { \n"\
-"                v.xyz = light.multiplier * Texture_SampleEnvMap(rays[global_id].d.xyz, TEXTURE_ARGS_IDX(light.tex)) * \n"\
-"                    Volume_Transmittance(&volumes[volume_idx], &rays[global_id], rays[global_id].o.w); \n"\
+"                if (volume_idx == -1) \n"\
+"                    v.xyz = light.multiplier * Texture_SampleEnvMap(rays[global_id].d.xyz, TEXTURE_ARGS_IDX(tex)); \n"\
+"                else \n"\
+"                { \n"\
+"                    v.xyz = light.multiplier * Texture_SampleEnvMap(rays[global_id].d.xyz, TEXTURE_ARGS_IDX(tex)) * \n"\
+"                        Volume_Transmittance(&volumes[volume_idx], &rays[global_id], rays[global_id].o.w); \n"\
 " \n"\
-"                v.xyz += Volume_Emission(&volumes[volume_idx], &rays[global_id], rays[global_id].o.w); \n"\
+"                    v.xyz += Volume_Emission(&volumes[volume_idx], &rays[global_id], rays[global_id].o.w); \n"\
+"                } \n"\
 "            } \n"\
 "        } \n"\
 " \n"\
@@ -5706,7 +5854,7 @@ static const char g_path_tracing_estimator_opencl[]= \
 "    // Ray batch \n"\
 "    GLOBAL ray const* restrict rays, \n"\
 "    // Intersection data \n"\
-"    GLOBAL Intersection const* restrict isects,  \n"\
+"    GLOBAL Intersection const* restrict isects,   \n"\
 "    // Pixel indices \n"\
 "    GLOBAL int const* restrict pixel_indices, \n"\
 "    // Output indices \n"\
@@ -5742,19 +5890,48 @@ static const char g_path_tracing_estimator_opencl[]= \
 "            Light light = lights[env_light_idx]; \n"\
 " \n"\
 "            // Apply MIS \n"\
+"            int surface_interaction_flags = Path_GetSurfaceInteractionFlags(path); \n"\
 "            float selection_pdf = Distribution1D_GetPdfDiscreet(env_light_idx, light_distribution); \n"\
-"            float light_pdf = EnvironmentLight_GetPdf(&light, 0, 0, rays[global_id].d.xyz, TEXTURE_ARGS); \n"\
+"            float light_pdf = EnvironmentLight_GetPdf(&light, 0, 0, surface_interaction_flags, rays[global_id].d.xyz, TEXTURE_ARGS); \n"\
 "            float2 extra = Ray_GetExtra(&rays[global_id]); \n"\
 "            float weight = extra.x > 0.f ? BalanceHeuristic(1, extra.x, 1, light_pdf * selection_pdf) : 1.f; \n"\
 " \n"\
 "            float3 t = Path_GetThroughput(path); \n"\
 "            float4 v = 0.f; \n"\
-"            v.xyz = REASONABLE_RADIANCE(weight * light.multiplier * Texture_SampleEnvMap(rays[global_id].d.xyz, TEXTURE_ARGS_IDX(light.tex)) * t); \n"\
+" \n"\
+"            int tex = EnvironmentLight_GetTexture(&light, surface_interaction_flags); \n"\
+"            if (tex != -1) \n"\
+"            { \n"\
+"                v.xyz = REASONABLE_RADIANCE(weight * light.multiplier * Texture_SampleEnvMap(rays[global_id].d.xyz, TEXTURE_ARGS_IDX(tex)) * t); \n"\
+"            } \n"\
+" \n"\
 "            ADD_FLOAT4(&output[output_index], v); \n"\
 "        } \n"\
 "    } \n"\
 "} \n"\
 " \n"\
+"///< Advance iteration count. Used on missed rays \n"\
+"KERNEL void AdvanceIterationCount( \n"\
+"    // Pixel indices \n"\
+"    GLOBAL int const* restrict pixel_indices, \n"\
+"    // Output indices \n"\
+"    GLOBAL int const*  restrict output_indices, \n"\
+"    // Number of rays \n"\
+"    GLOBAL int* restrict num_rays, \n"\
+"    // Output values \n"\
+"    GLOBAL float4* restrict output \n"\
+") \n"\
+"{ \n"\
+"    int global_id = get_global_id(0); \n"\
+"    if (global_id < num_rays) \n"\
+"    { \n"\
+"        int pixel_idx = pixel_indices[global_id]; \n"\
+"        int output_index = output_indices[pixel_idx]; \n"\
+" \n"\
+"        float4 v = make_float4(0.f, 0.f, 0.f, 1.f); \n"\
+"        ADD_FLOAT4(&output[output_index], v); \n"\
+"    } \n"\
+"} \n"\
 ;
 static const char g_payload_opencl[]= \
 "/********************************************************************** \n"\
@@ -5939,9 +6116,9 @@ static const char g_payload_opencl[]= \
 "        struct \n"\
 "        { \n"\
 "            int tex; \n"\
-"            int texdiffuse; \n"\
-"            float multiplier; \n"\
-"            int padding1; \n"\
+"            int tex_reflection; \n"\
+"            int tex_refraction; \n"\
+"            int tex_transparency; \n"\
 "        }; \n"\
 " \n"\
 "        // Spot \n"\
@@ -5958,7 +6135,9 @@ static const char g_payload_opencl[]= \
 "    float3 d; \n"\
 "    float3 intensity; \n"\
 "    int type; \n"\
-"    int padding[3]; \n"\
+"    float multiplier; \n"\
+"    int tex_background; \n"\
+"    int padding; \n"\
 "} Light; \n"\
 " \n"\
 "typedef enum \n"\
@@ -8237,6 +8416,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "#define GAUSS_KERNEL_SIZE 9 \n"\
 "#define DENOM_EPS 1e-8f \n"\
 "#define FRAME_BLEND_ALPHA 0.2f \n"\
+"#define MLAA_MAX_SEARCH_STEPS 15 \n"\
 " \n"\
 "// Gauss filter 3x3 for variance prefiltering on first wavelet pass \n"\
 "float4 GaussFilter3x3( \n"\
@@ -8279,8 +8459,7 @@ static const char g_wavelet_denoise_opencl[]= \
 " \n"\
 "int ConvertToLinearAddressInt2(int2 address, int2 buffer_size) \n"\
 "{ \n"\
-"    int max_buffer_size = buffer_size.x * buffer_size.y; \n"\
-"    return clamp(address.y * buffer_size.x + address.x, 0, max_buffer_size - 1); \n"\
+"    return ConvertToLinearAddress(address.x, address.y, buffer_size); \n"\
 "} \n"\
 " \n"\
 "// Bilinear sampler \n"\
@@ -8364,10 +8543,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "     \n"\
 "    const int2 buffer_size  = make_int2(width, height); \n"\
 "    const float2 uv = make_float2(global_id.x + 0.5f, global_id.y + 0.5f) / make_float2(width, height); \n"\
-" \n"\
-"    // From SVGF paper \n"\
-"    const float sigma_variance = 4.0f; \n"\
-" \n"\
+"  \n"\
 "    // Check borders \n"\
 "    if (global_id.x < width && global_id.y < height) \n"\
 "    { \n"\
@@ -8381,11 +8557,16 @@ static const char g_wavelet_denoise_opencl[]= \
 "        const float variance = step_width == 1 ? sqrt(GaussFilter3x3(variances, buffer_size, global_id).z) : sqrt(variances[idx].z); \n"\
 "        const float step_width_2 = (float)(step_width * step_width); \n"\
 "         \n"\
-"        float3 color_sum = color; // make_float3(0.0f, 0.0f, 0.0f); \n"\
-"        float weight_sum = 1.f; \n"\
+"        float3 color_sum = make_float3(0.0f, 0.0f, 0.0f); \n"\
+"        float weight_sum = 0.f; \n"\
 " \n"\
 "        const float3 luminance = make_float3(0.2126f, 0.7152f, 0.0722f); \n"\
 "        const float lum_color = dot(color, luminance); \n"\
+" \n"\
+"        const float max_sigma_variance = 8.0f; \n"\
+"        const float min_sigma_variance = 1.0f; \n"\
+"        const float sigma_adaptation_samples = 100.0f; \n"\
+"        const float sigma_variance = max(max_sigma_variance * exp(-albedo[idx].w / sigma_adaptation_samples), min_sigma_variance); \n"\
 " \n"\
 "        if (length(position) > 0.f && !any(isnan(color))) \n"\
 "        { \n"\
@@ -8403,21 +8584,17 @@ static const char g_wavelet_denoise_opencl[]= \
 "                const float3 delta_position     = position - sample_position; \n"\
 "                const float3 delta_color        = calbedo - sample_albedo; \n"\
 " \n"\
-"                const float position_dist2      = dot(delta_position, delta_position) ; \n"\
+"                const float position_dist2      = dot(delta_position, delta_position); \n"\
 "                const float color_dist2         = dot(delta_color, delta_color); \n"\
 " \n"\
 "                const float position_value     = exp(-position_dist2 / (sigma_position * 20.f)); \n"\
-"                const float normal_value       = exp(-dot(sample_normal, normal) / 5.0f); \n"\
 "                const float color_value        = exp(-color_dist2 / sigma_color); \n"\
 " \n"\
 "                const float position_weight     = isnan(position_value) ? 1.f : position_value; \n"\
-"                const float normal_weight       = isnan(normal_value) ? 1.f : normal_value; \n"\
 "                const float color_weight        = isnan(color_value) ? 1.f : color_value; \n"\
+"                const float normal_weight       = pow(max(0.f, dot(sample_normal, normal)), 128.f); \n"\
 " \n"\
-"                // Gives more sharp image then exp, but produces dark sillhoutes if color buffer contains more than 1 spp \n"\
-"                //const float normal_weight       = pow(max(0.f, dot(sample_normal, normal)), 128.f); \n"\
-" \n"\
-"                const float lum_value           = step_width * exp(-fabs(lum_color - dot(luminance, sample_color)) / (sigma_variance * variance + DENOM_EPS)); \n"\
+"                const float lum_value           = exp(-fabs((lum_color - dot(luminance, sample_color))) / (sigma_variance * variance + DENOM_EPS)); \n"\
 "                const float luminance_weight    = isnan(lum_value) ? 1.f : lum_value; \n"\
 " \n"\
 "                const float final_weight = color_weight * luminance_weight * normal_weight * position_weight * kernel_weights[i]; \n"\
@@ -8448,8 +8625,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "    // View-projection matrix of previous frame \n"\
 "    GLOBAL matrix4x4* restrict prev_view_projection, \n"\
 "    // Resulting motion and depth \n"\
-"    GLOBAL float4* restrict out_motion, \n"\
-"    GLOBAL float4* restrict out_depth \n"\
+"    GLOBAL float4* restrict out_motion \n"\
 ") \n"\
 "{ \n"\
 "    int2 global_id; \n"\
@@ -8475,8 +8651,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "            float2 prev_position_cs = prev_position_ps.xy / prev_position_ps.w; \n"\
 "            float2 prev_position_ss = prev_position_cs * make_float2(0.5f, -0.5f) + make_float2(0.5f, 0.5f); \n"\
 " \n"\
-"            out_motion[idx] = (float4)(prev_position_ss - position_ss, 0.0f, 1.0f) * 2.0f; \n"\
-"            out_depth[idx] = make_float4(0.0f, 0.0f, position_ps.w, 1.0f); \n"\
+"            out_motion[idx] = (float4)(prev_position_ss - position_ss, 0.0f, 1.0f); \n"\
 "        } \n"\
 "        else \n"\
 "        { \n"\
@@ -8491,13 +8666,15 @@ static const char g_wavelet_denoise_opencl[]= \
 "    GLOBAL float4 const* restrict colors, \n"\
 "    GLOBAL float4 const* restrict positions, \n"\
 "    GLOBAL float4 const* restrict normals, \n"\
+"    GLOBAL float4 const* restrict mesh_ids, \n"\
 "    // Image resolution \n"\
 "    int width, \n"\
 "    int height, \n"\
 "    // Output buffers \n"\
 "    GLOBAL float4* restrict out_colors, \n"\
 "    GLOBAL float4* restrict out_positions, \n"\
-"    GLOBAL float4* restrict out_normals \n"\
+"    GLOBAL float4* restrict out_normals, \n"\
+"    GLOBAL float4* restrict out_mesh_ids \n"\
 ") \n"\
 "{ \n"\
 "    int2 global_id; \n"\
@@ -8512,6 +8689,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "        out_colors[idx] = (float4)(colors[idx].xyz / max(colors[idx].w,  1.f), 1.f); \n"\
 "        out_positions[idx] = (float4)(positions[idx].xyz / max(positions[idx].w,  1.f), 1.f); \n"\
 "        out_normals[idx] = (float4)(normals[idx].xyz / max(normals[idx].w,  1.f), 1.f); \n"\
+"        out_mesh_ids[idx] = mesh_ids[idx]; \n"\
 "    } \n"\
 "} \n"\
 " \n"\
@@ -8544,7 +8722,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "} \n"\
 " \n"\
 "// Geometry consistency term - position consistency \n"\
-"bool IsDepthConsistentPos( \n"\
+"bool IsPositionConsistent( \n"\
 "    GLOBAL float4 const* restrict buffer,  \n"\
 "    GLOBAL float4 const* restrict prev_buffer,  \n"\
 "    float2 uv,  \n"\
@@ -8562,18 +8740,19 @@ static const char g_wavelet_denoise_opencl[]= \
 "    return length(p1 - p0) < length(ddx) + length(ddy); \n"\
 "} \n"\
 " \n"\
-" \n"\
-" \n"\
 "// Bilinear filtering with geometry test on each tap (resampling of previous color buffer) \n"\
 "// TODO: Add depth test consistency \n"\
 "float4 SampleWithGeometryTest(GLOBAL float4 const* restrict buffer, \n"\
 "    float4 current_color, \n"\
 "    float3 current_positions, \n"\
 "    float3 current_normal, \n"\
+"    int current_mesh_id, \n"\
 "    GLOBAL float4 const* restrict positions, \n"\
 "    GLOBAL float4 const* restrict normals, \n"\
+"    GLOBAL float4 const* restrict mesh_ids, \n"\
 "    GLOBAL float4 const* restrict prev_positions, \n"\
 "    GLOBAL float4 const* restrict prev_normals, \n"\
+"    GLOBAL float4 const* restrict prev_mesh_ids, \n"\
 "    int2 buffer_size, \n"\
 "    float2 uv, \n"\
 "    float2 uv_prev) \n"\
@@ -8606,10 +8785,24 @@ static const char g_wavelet_denoise_opencl[]= \
 "        IsNormalConsistent(current_normal, normal_samples[2]), \n"\
 "        IsNormalConsistent(current_normal, normal_samples[3]) \n"\
 "    }; \n"\
+"     \n"\
+"    const int mesh_id_samples[4] = { \n"\
+"        (int)prev_mesh_ids[ConvertToLinearAddressInt2(offsets[0], buffer_size)].x, \n"\
+"        (int)prev_mesh_ids[ConvertToLinearAddressInt2(offsets[1], buffer_size)].x, \n"\
+"        (int)prev_mesh_ids[ConvertToLinearAddressInt2(offsets[2], buffer_size)].x, \n"\
+"        (int)prev_mesh_ids[ConvertToLinearAddressInt2(offsets[3], buffer_size)].x \n"\
+"    }; \n"\
+" \n"\
+"    const bool is_mesh_id_consistent[4] = { \n"\
+"        current_mesh_id == mesh_id_samples[0], \n"\
+"        current_mesh_id == mesh_id_samples[1], \n"\
+"        current_mesh_id == mesh_id_samples[2], \n"\
+"        current_mesh_id == mesh_id_samples[3] \n"\
+"    }; \n"\
 " \n"\
 "    int num_consistent_samples = 0; \n"\
-"     \n"\
-"    for (int i = 0; i < 4; i++) num_consistent_samples += is_normal_consistent[i]  ? 1 : 0; \n"\
+" \n"\
+"    for (int i = 0; i < 4; i++) num_consistent_samples += is_normal_consistent[i] && is_mesh_id_consistent[i] ? 1 : 0; \n"\
 " \n"\
 "    // Bilinear resample if all samples are consistent \n"\
 "    if (num_consistent_samples == 4) \n"\
@@ -8617,6 +8810,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "        return Sampler2DBilinear(buffer, buffer_size, uv_prev); \n"\
 "    } \n"\
 " \n"\
+"    // Box filter otherwise \n"\
 "    const float4 buffer_samples[4] = { \n"\
 "        buffer[ConvertToLinearAddressInt2(offsets[0], buffer_size)], \n"\
 "        buffer[ConvertToLinearAddressInt2(offsets[1], buffer_size)], \n"\
@@ -8624,20 +8818,19 @@ static const char g_wavelet_denoise_opencl[]= \
 "        buffer[ConvertToLinearAddressInt2(offsets[3], buffer_size)] \n"\
 "    }; \n"\
 " \n"\
-"    // Box filter otherwise \n"\
 "    float weight = 1; \n"\
 "    float4 sample = current_color; \n"\
 " \n"\
 "    for (int i = 0; i < 4; i++) \n"\
 "    { \n"\
-"        if (is_normal_consistent[i]) \n"\
+"        if (is_normal_consistent[i] && is_mesh_id_consistent[i]) \n"\
 "        { \n"\
 "            sample += buffer_samples[i]; \n"\
 "            weight += 1.f; \n"\
 "        } \n"\
 "    } \n"\
-" \n"\
-"    return sample / weight; \n"\
+"     \n"\
+"    return sample / max(weight, 1.f); \n"\
 "} \n"\
 " \n"\
 "// Similarity function \n"\
@@ -8682,10 +8875,10 @@ static const char g_wavelet_denoise_opencl[]= \
 "            float3 c = colors[ci].xyz / colors[ci].w; \n"\
 "            float3 n = normals[ci].xyz / normals[ci].w; \n"\
 "            float3 p = positions[ci].xyz / positions[ci].w; \n"\
-"             \n"\
+" \n"\
 "            float sigma_position = 0.1f; \n"\
 "            float sigma_normal = 0.1f; \n"\
-" \n"\
+"             \n"\
 "            if (length(p) > 0.f && !any(isnan(c))) \n"\
 "            { \n"\
 "                const float weight = C(p, position, sigma_position) * C(n, normal, sigma_normal); \n"\
@@ -8697,7 +8890,7 @@ static const char g_wavelet_denoise_opencl[]= \
 "            } \n"\
 "        } \n"\
 "    } \n"\
-"     \n"\
+" \n"\
 "    local_mean      = local_mean / max(DENOM_EPS, sum_weight); \n"\
 "    local_mean_2    = local_mean_2 / max(DENOM_EPS, sum_weight);; \n"\
 " \n"\
@@ -8718,6 +8911,8 @@ static const char g_wavelet_denoise_opencl[]= \
 "    GLOBAL float4 const* restrict motions, \n"\
 "    GLOBAL float4 const* restrict prev_moments_and_variance, \n"\
 "    GLOBAL float4* restrict moments_and_variance, \n"\
+"    GLOBAL float4* restrict mesh_ids, \n"\
+"    GLOBAL float4* restrict prev_mesh_ids, \n"\
 "    // Image resolution \n"\
 "    int width, \n"\
 "    int height \n"\
@@ -8727,18 +8922,17 @@ static const char g_wavelet_denoise_opencl[]= \
 "    global_id.x = get_global_id(0); \n"\
 "    global_id.y = get_global_id(1); \n"\
 " \n"\
-"    const int bilateral_filter_kernel_size = 7; \n"\
-" \n"\
 "    // Check borders \n"\
 "    if (global_id.x < width && global_id.y < height) \n"\
 "    { \n"\
-"        const int idx = global_id.y * width + global_id.x; \n"\
-"         \n"\
-"        moments_and_variance[idx] = make_float4(0.f, 0.f, 0.f, 0.f); \n"\
+"        const int idx = global_id.y * width + global_id.x;       \n"\
+"        const int mesh_id = (int)mesh_ids[idx].x; \n"\
 " \n"\
 "        const float3 position_xyz = positions[idx].xyz; \n"\
 "        const float3 normal = normals[idx].xyz; \n"\
 "        const float3 color = in_out_colors[idx].xyz; \n"\
+"         \n"\
+"        const int bilateral_filter_kernel_size = 7; \n"\
 " \n"\
 "        if (length(position_xyz) > 0 && !any(isnan(color))) \n"\
 "        { \n"\
@@ -8748,63 +8942,61 @@ static const char g_wavelet_denoise_opencl[]= \
 "            const float2 uv = make_float2(global_id.x + 0.5f, global_id.y + 0.5f) / make_float2(width, height); \n"\
 "            const float2 prev_uv = clamp(uv + motion, make_float2(0.f, 0.f), make_float2(1.f, 1.f)); \n"\
 "             \n"\
+"            const float sample_prev_mesh_id = (float)Sampler2DBilinear(prev_mesh_ids, buffer_size, prev_uv).x; \n"\
+"            const int prev_mesh_id = (sample_prev_mesh_id - floor(sample_prev_mesh_id)) > 0.f ? -1 : (int)sample_prev_mesh_id; \n"\
+" \n"\
 "            const float3 prev_position_xyz  = Sampler2DBilinear(prev_positions, buffer_size, prev_uv).xyz; \n"\
-"            const float3 prev_normal        = Sampler2DBilinear(prev_normals, buffer_size, prev_uv).xyz; \n"\
+"            const float3 prev_normal        = normalize(Sampler2DBilinear(prev_normals, buffer_size, prev_uv).xyz); \n"\
 " \n"\
 "            // Test for geometry consistency \n"\
-"            if (length(prev_position_xyz) > 0 && IsDepthConsistentPos(positions, prev_positions, uv, motion, buffer_size) && IsNormalConsistent(prev_normal, normal)) \n"\
+"            if (length(prev_position_xyz) > 0 &&  mesh_id == prev_mesh_id && IsNormalConsistent(prev_normal, normal) && IsPositionConsistent(positions, prev_positions, uv, motion, buffer_size)) \n"\
 "            { \n"\
 "                // Temporal accumulation of moments \n"\
-"                const int prev_idx = global_id.y * width + global_id.x; \n"\
-" \n"\
 "                float4 prev_moments_and_variance_sample  = Sampler2DBilinear(prev_moments_and_variance, buffer_size, prev_uv); \n"\
 " \n"\
 "                const bool prev_moments_is_nan = any(isnan(prev_moments_and_variance_sample)); \n"\
 " \n"\
 "                float4 current_moments_and_variance_sample; \n"\
+"                 \n"\
+"                current_moments_and_variance_sample.w = prev_moments_and_variance_sample.w + 1.f; \n"\
 " \n"\
 "                if (prev_moments_and_variance_sample.w < 4 || prev_moments_is_nan) \n"\
 "                { \n"\
 "                    // Not enought accumulated samples - get bilateral estimate \n"\
-"                    current_moments_and_variance_sample = BilateralVariance(in_out_colors, positions, normals, global_id, buffer_size, bilateral_filter_kernel_size); \n"\
-"                    prev_moments_and_variance_sample = prev_moments_is_nan ? current_moments_and_variance_sample : prev_moments_and_variance_sample; \n"\
+"                    current_moments_and_variance_sample.xyz = BilateralVariance(in_out_colors, positions, normals, global_id, buffer_size, bilateral_filter_kernel_size).xyz; \n"\
 "                } \n"\
 "                else \n"\
 "                { \n"\
 "                    // Otherwise calculate moments for current color  \n"\
 "                    const float3 luminance_weight = make_float3(0.2126f, 0.7152f, 0.0722f); \n"\
 "                     \n"\
-"                    const float first_moment = dot(in_out_colors[idx].xyz, luminance_weight); \n"\
+"                    const float first_moment = dot(color, luminance_weight); \n"\
 "                    const float second_moment = first_moment * first_moment; \n"\
 "                     \n"\
-"                    current_moments_and_variance_sample = make_float4(first_moment, second_moment, 0.f, 1.f); \n"\
+"                    current_moments_and_variance_sample.xy += make_float2(first_moment, second_moment); \n"\
+"                    current_moments_and_variance_sample.z = (second_moment - first_moment * first_moment) / current_moments_and_variance_sample.w; \n"\
 "                } \n"\
-"                 \n"\
+" \n"\
 "                // Nan avoidance \n"\
 "                if (any(isnan(prev_moments_and_variance_sample))) \n"\
 "                { \n"\
 "                    prev_moments_and_variance_sample = make_float4(0,0,0,1); \n"\
 "                } \n"\
 " \n"\
-"                // Accumulate current and previous moments \n"\
-"                moments_and_variance[idx].xy    = mix(prev_moments_and_variance_sample.xy, current_moments_and_variance_sample.xy, FRAME_BLEND_ALPHA); \n"\
-"                moments_and_variance[idx].w     = 1; \n"\
-" \n"\
-"                const float mean          = moments_and_variance[idx].x; \n"\
-"                const float mean_2        = moments_and_variance[idx].y; \n"\
+"                float2 moments = mix(prev_moments_and_variance_sample.xy, current_moments_and_variance_sample.xy, FRAME_BLEND_ALPHA); \n"\
+"                float variance = moments.y - moments.x * moments.x; \n"\
 "                 \n"\
-"                moments_and_variance[idx].z     = mean_2 - mean * mean; \n"\
+"                moments_and_variance[idx] = make_float4(moments.x, moments.y, variance, current_moments_and_variance_sample.w); \n"\
 " \n"\
 "                // Temporal accumulation of color \n"\
-"                float3 prev_color = SampleWithGeometryTest(prev_colors, (float4)(color, 1.f), position_xyz, normal, positions, normals, prev_positions, prev_normals, buffer_size, uv, prev_uv).xyz; \n"\
-" \n"\
-"                in_out_colors[idx].xyz = mix(prev_color, color, FRAME_BLEND_ALPHA); \n"\
+"                float3 prev_color = SampleWithGeometryTest(prev_colors, (float4)(color, 1.f), position_xyz, normal, mesh_id, positions, normals, mesh_ids, prev_positions, prev_normals, prev_mesh_ids, buffer_size, uv, prev_uv).xyz; \n"\
+"                 \n"\
+"                in_out_colors[idx].xyz = (dot(motion, motion) != 0.f) ? mix(prev_color, color, FRAME_BLEND_ALPHA) : in_out_colors[idx].xyz; \n"\
 "                in_out_colors[idx].w = 1.0f; \n"\
 "            } \n"\
 "            else \n"\
 "            { \n"\
-"                // In case of disoclussion - calclulate variance by bilateral filter \n"\
-"                //in_out_colors[idx].xyz = make_float3(1,0,0); \n"\
+"                // In case of disoclussion - calclulate variance by bilateral estimate \n"\
 "                moments_and_variance[idx] = BilateralVariance(in_out_colors, positions, normals, global_id, buffer_size, bilateral_filter_kernel_size); \n"\
 "            } \n"\
 "        } \n"\
@@ -8837,6 +9029,283 @@ static const char g_wavelet_denoise_opencl[]= \
 "        out_variance[idx] = BilateralVariance(colors, positions, normals, global_id, buffer_size, bilateral_filter_kernel_size); \n"\
 "    }  \n"\
 "} \n"\
+" \n"\
+"// Jimenez MLAA. Implementation was adapted to OpenCL \n"\
+" \n"\
+"/** \n"\
+" * Copyright (C) 2010 Jorge Jimenez (jorge@iryoku.com) \n"\
+" * Copyright (C) 2010 Belen Masia (bmasia@unizar.es)  \n"\
+" * Copyright (C) 2010 Jose I. Echevarria (joseignacioechevarria@gmail.com)  \n"\
+" * Copyright (C) 2010 Fernando Navarro (fernandn@microsoft.com)  \n"\
+" * Copyright (C) 2010 Diego Gutierrez (diegog@unizar.es) \n"\
+" * All rights reserved. \n"\
+" * \n"\
+" * Redistribution and use in source and binary forms, with or without \n"\
+" * modification, are permitted provided that the following conditions are met: \n"\
+" *  \n"\
+" *    1. Redistributions of source code must retain the above copyright notice, \n"\
+" *       this list of conditions and the following disclaimer. \n"\
+" *  \n"\
+" *    2. Redistributions in binary form must reproduce the following statement: \n"\
+" *  \n"\
+" *       \"Uses Jimenez's MLAA. Copyright (C) 2010 by Jorge Jimenez, Belen Masia, \n"\
+" *        Jose I. Echevarria, Fernando Navarro and Diego Gutierrez.\" \n"\
+" * \n"\
+" * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS ``AS  \n"\
+" * IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,  \n"\
+" * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR  \n"\
+" * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL COPYRIGHT HOLDERS OR CONTRIBUTORS  \n"\
+" * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR  \n"\
+" * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF  \n"\
+" * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS  \n"\
+" * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN  \n"\
+" * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)  \n"\
+" * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE  \n"\
+" * POSSIBILITY OF SUCH DAMAGE. \n"\
+" *  \n"\
+" * The views and conclusions contained in the software and documentation are  \n"\
+" * those of the authors and should not be interpreted as representing official \n"\
+" * policies, either expressed or implied, of the copyright holders. \n"\
+" */ \n"\
+" \n"\
+"float4 texture2D(GLOBAL float4 const* restrict buffer, float2 uv, int2 buffer_size) \n"\
+"{ \n"\
+"    return buffer[ConvertToLinearAddressInt2(make_int2(uv.x * buffer_size.x, uv.y * buffer_size.y), buffer_size)]; \n"\
+"} \n"\
+" \n"\
+"float4 texture2DOffset(GLOBAL float4 const* restrict buffer, float2 uv, int2 offset, int2 buffer_size, float2 rcp_buffer) \n"\
+"{ \n"\
+"    uv = uv + make_float2(offset.x * rcp_buffer.x, offset.y * rcp_buffer.y); \n"\
+" \n"\
+"    return buffer[ConvertToLinearAddressInt2(make_int2(uv.x * buffer_size.x, uv.y * buffer_size.y), buffer_size)]; \n"\
+"} \n"\
+" \n"\
+"float4 texture2DOffsetInt2(GLOBAL float4 const* restrict buffer, int2 uv, int2 offset, int2 buffer_size) \n"\
+"{ \n"\
+"    uv = uv + offset; \n"\
+" \n"\
+"    return buffer[ConvertToLinearAddressInt2(make_int2(uv.x, uv.y), buffer_size)]; \n"\
+"} \n"\
+" \n"\
+"KERNEL \n"\
+"void EdgeDetectionMLAA(GLOBAL float4 const* restrict mesh_id, \n"\
+"                            GLOBAL float4 const* restrict normal, \n"\
+"                            int width, \n"\
+"                            int height, \n"\
+"                            GLOBAL float4* restrict out_buffer) \n"\
+"{ \n"\
+"    int2 global_id; \n"\
+"    global_id.x = get_global_id(0); \n"\
+"    global_id.y = get_global_id(1); \n"\
+" \n"\
+"    const int max_pixels = width * height; \n"\
+"    const int idx = clamp(global_id.y * width + global_id.x, 0, max_pixels); \n"\
+"    const int2 buffer_size = make_int2(width, height); \n"\
+" \n"\
+"    const float3 weights = make_float3(0.2126,0.7152, 0.0722); \n"\
+"     \n"\
+"    int2 edges = make_int2(0,0); \n"\
+"     \n"\
+"    float id        = mesh_id[ConvertToLinearAddressInt2(global_id, buffer_size)].x; \n"\
+"    float id_left   = texture2DOffsetInt2(mesh_id, global_id, make_int2(-1, 0), buffer_size).x; \n"\
+"    float id_top    = texture2DOffsetInt2(mesh_id, global_id, make_int2(0, -1), buffer_size).x; \n"\
+" \n"\
+"    edges.x = id != id_left ? 1 : 0; \n"\
+"    edges.y = id != id_top ? 1 : 0; \n"\
+" \n"\
+"    float3 N = normalize(normal[ConvertToLinearAddressInt2(global_id, buffer_size)].xyz); \n"\
+"     \n"\
+"    if (length(N) > 0) \n"\
+"    { \n"\
+"        float3 Nleft = normalize(texture2DOffsetInt2(normal, global_id, make_int2(-1, 0), buffer_size).xyz); \n"\
+"        float3 Ntop  = normalize(texture2DOffsetInt2(normal, global_id, make_int2(0, -1), buffer_size).xyz); \n"\
+" \n"\
+"        const float threshold  = cos(PI / 8.f); \n"\
+"        float2 delta = make_float2(dot(N, Nleft), dot(N, Ntop)); \n"\
+"         \n"\
+"        edges.x |= delta.x < threshold ? 1 : 0; \n"\
+"        edges.y |= delta.y < threshold ? 1 : 0; \n"\
+"    } \n"\
+" \n"\
+"    out_buffer[idx] = make_float4((float)edges.x, (float)edges.y, 0.f, 0.f); \n"\
+"} \n"\
+" \n"\
+"float SearchXLeft(GLOBAL float4 const* restrict edgesTex, float2 texcoord, int2 buffer_size, float2 rcp_frame) { \n"\
+"    texcoord -= make_float2(1.5f, 0.0f) * rcp_frame; \n"\
+"     \n"\
+"    float e = 0.0f; \n"\
+"    int i = 0; \n"\
+" \n"\
+"    for (i = 0; i < MLAA_MAX_SEARCH_STEPS; i++) { \n"\
+"        e = Sampler2DBilinear(edgesTex, buffer_size, texcoord).y; \n"\
+"        if (e < 0.9) break; \n"\
+"        texcoord -= make_float2(2.0f, 0.0f) * rcp_frame; \n"\
+"    } \n"\
+" \n"\
+"    return max(-2.0f * i - 2.0f * e, -2.0f * MLAA_MAX_SEARCH_STEPS); \n"\
+"} \n"\
+" \n"\
+"float SearchXRight(GLOBAL float4 const* restrict edgesTex, float2 texcoord, int2 buffer_size, float2 rcp_frame) { \n"\
+"    texcoord += make_float2(1.5f, 0.0f) * rcp_frame; \n"\
+"     \n"\
+"    float e = 0.0f; \n"\
+"    int i = 0; \n"\
+" \n"\
+"    for (i = 0; i < MLAA_MAX_SEARCH_STEPS; i++) { \n"\
+"        e = Sampler2DBilinear(edgesTex, buffer_size, texcoord).y; \n"\
+"        if (e < 0.9) break; \n"\
+"        texcoord += make_float2(2.0f, 0.0f) * rcp_frame; \n"\
+"    } \n"\
+" \n"\
+"    return min(2.0f * i + 2.0f * e, 2.0f * MLAA_MAX_SEARCH_STEPS); \n"\
+"} \n"\
+" \n"\
+"float SearchYUp(GLOBAL float4 const* restrict edgesTex, float2 texcoord, int2 buffer_size, float2 rcp_frame) { \n"\
+"    texcoord += make_float2(0.0, -1.5) * rcp_frame; \n"\
+"     \n"\
+"    float e = 0.0; \n"\
+"    int i = 0; \n"\
+" \n"\
+"    for (i = 0; i < MLAA_MAX_SEARCH_STEPS; i++) { \n"\
+"        e = Sampler2DBilinear(edgesTex, buffer_size, texcoord).x; \n"\
+"        if (e < 0.9) break; \n"\
+"        texcoord += make_float2(0.0f, -2.0f) * rcp_frame; \n"\
+"    } \n"\
+"     \n"\
+"    return fmax(-2.0f * i - 2.0f * e, -2.0f * MLAA_MAX_SEARCH_STEPS); \n"\
+"} \n"\
+" \n"\
+"float SearchYDown(GLOBAL float4 const* restrict edgesTex, float2 texcoord, int2 buffer_size, float2 rcp_frame) { \n"\
+"    texcoord -= make_float2(0.0, -1.5) * rcp_frame; \n"\
+"     \n"\
+"    float e = 0.0; \n"\
+"    int i = 0; \n"\
+" \n"\
+"    for (i = 0; i < MLAA_MAX_SEARCH_STEPS; i++) { \n"\
+"        e = Sampler2DBilinear(edgesTex, buffer_size, texcoord).x; \n"\
+"        if (e < 0.9) break; \n"\
+"        texcoord -= make_float2(0.0f, -2.0f) * rcp_frame; \n"\
+"    } \n"\
+"    return fmin(2.0f * i + 2.0f * e, 2.0f * MLAA_MAX_SEARCH_STEPS); \n"\
+"} \n"\
+" \n"\
+"#define MAX_DISTANCE 33 \n"\
+" \n"\
+"float2 Area(GLOBAL float4 const* restrict areaTex, float2 distance, float e1, float e2) { \n"\
+"    // * By dividing by areaSize - 1.0 below we are implicitely offsetting to \n"\
+"    //   always fall inside of a pixel \n"\
+"    // * Rounding prevents bilinear access precision problems \n"\
+"   float areaSize = MAX_DISTANCE * 5.0f; \n"\
+"   float2 pixcoord = MAX_DISTANCE * round(4.0f * make_float2(e1, e2)) + distance; \n"\
+"   float2 texcoord = pixcoord / (areaSize - 1.0f); \n"\
+"   return texture2D(areaTex, texcoord, make_int2(areaSize, areaSize)).xy; \n"\
+"} \n"\
+" \n"\
+"KERNEL \n"\
+"void BlendingWeightCalculationMLAA( GLOBAL float4 const* restrict edgesTex, \n"\
+"                                    GLOBAL float4 const* restrict areaTex, \n"\
+"                                    int width, \n"\
+"                                    int height, \n"\
+"                                    GLOBAL float4* restrict out_buffer) \n"\
+"{ \n"\
+"    int2 global_id; \n"\
+"    global_id.x = get_global_id(0); \n"\
+"    global_id.y = get_global_id(1); \n"\
+" \n"\
+"    const float2 rcp_frame = make_float2(1.f / (float)width, 1.f / (float)height); \n"\
+"    const int max_pixels = width * height; \n"\
+"    const int idx = clamp(global_id.y * width + global_id.x, 0, max_pixels); \n"\
+"    const int2 buffer_size = make_int2(width, height); \n"\
+"    const float2 texcoord = make_float2((float)global_id.x / (float)width, (float)global_id.y / (float)height) + make_float2(0.5f, 0.5f) * rcp_frame;    \n"\
+" \n"\
+"    float4 weights = make_float4(0.f, 0.f, 0.f, 0.f); \n"\
+" \n"\
+"    float2 e = texture2D(edgesTex, texcoord, buffer_size).xy; \n"\
+" \n"\
+"    if (e.y) { // Edge at north \n"\
+"        // Search distances to the left and to the right: \n"\
+"        float2 d = make_float2(SearchXLeft(edgesTex, texcoord, buffer_size, rcp_frame), SearchXRight(edgesTex, texcoord, buffer_size, rcp_frame)); \n"\
+" \n"\
+"        // Now fetch the crossing edges. Instead of sampling between edgels, we \n"\
+"        // sample at -0.25, to be able to discern what value has each edgel: \n"\
+"        float4 coords = mad(make_float4(d.x, -0.25f, d.y + 1.0f, -0.25f), rcp_frame.xyxy, texcoord.xyxy); \n"\
+"        float e1 = Sampler2DBilinear(edgesTex, buffer_size, coords.xy).x; \n"\
+"        float e2 = Sampler2DBilinear(edgesTex, buffer_size, coords.zw).x; \n"\
+" \n"\
+"        // Ok, we know how this pattern looks like, now it is time for getting \n"\
+"        // the actual area: \n"\
+"        weights.xy = Area(areaTex, fabs(d), e1, e2); \n"\
+"    } \n"\
+" \n"\
+"    if (e.x) { // Edge at west \n"\
+"        // Search distances to the top and to the bottom: \n"\
+"        float2 d = make_float2(SearchYUp(edgesTex, texcoord, buffer_size, rcp_frame), SearchYDown(edgesTex, texcoord, buffer_size, rcp_frame)); \n"\
+" \n"\
+"        // Now fetch the crossing edges (yet again): \n"\
+"        float4 coords = mad(make_float4(-0.25f, d.x, -0.25f, (d.y + 1.0f)), rcp_frame.xyxy, texcoord.xyxy); \n"\
+"        float e1 = Sampler2DBilinear(edgesTex, buffer_size, coords.xy).y; \n"\
+"        float e2 = Sampler2DBilinear(edgesTex, buffer_size, coords.zw).y; \n"\
+" \n"\
+"        // Get the area for this direction: \n"\
+"        weights.zw = Area(areaTex, fabs(d), e1, e2); \n"\
+"    } \n"\
+" \n"\
+"    out_buffer[idx] = weights; \n"\
+"} \n"\
+" \n"\
+"KERNEL \n"\
+"void NeighborhoodBlendingMLAA(  GLOBAL float4 const* restrict colorTex, \n"\
+"                                GLOBAL float4 const* restrict blendTex, \n"\
+"                                int width, \n"\
+"                                int height, \n"\
+"                                GLOBAL float4* restrict out_buffer) \n"\
+"{ \n"\
+"    int2 global_id; \n"\
+"    global_id.x = get_global_id(0); \n"\
+"    global_id.y = get_global_id(1); \n"\
+" \n"\
+"    const float2 rcp_frame = make_float2(1.f / (float)width, 1.f / (float)height); \n"\
+"    const int max_pixels = width * height; \n"\
+"    const int idx = clamp(global_id.y * width + global_id.x, 0, max_pixels); \n"\
+"    const int2 buffer_size = make_int2(width, height); \n"\
+"    const float2 texcoord = make_float2((float)global_id.x / (float)width, (float)global_id.y / (float)height) + make_float2(0.5f, 0.5f) * rcp_frame; \n"\
+" \n"\
+"    // Fetch the blending weights for current pixel: \n"\
+"    float4 topLeft = blendTex[ConvertToLinearAddressInt2(global_id, buffer_size)]; \n"\
+"    float bottom = texture2DOffsetInt2(blendTex, global_id, make_int2(0, 1), buffer_size).y; \n"\
+"    float right = texture2DOffsetInt2(blendTex, global_id, make_int2(1, 0), buffer_size).w; \n"\
+"    float4 a = make_float4(topLeft.x, bottom, topLeft.z, right); \n"\
+" \n"\
+"    // Up to 4 lines can be crossing a pixel (one in each edge). So, we perform \n"\
+"    // a weighted average, where the weight of each line is 'a' cubed, which \n"\
+"    // favors blending and works well in practice. \n"\
+"    float4 w = a * a * a; \n"\
+" \n"\
+"    // There is some blending weight with a value greater than 0.0? \n"\
+"    float sum = dot(w, 1.0); \n"\
+"     \n"\
+"    if (sum < 1e-5) \n"\
+"    { \n"\
+"        out_buffer[idx] = colorTex[idx]; \n"\
+"        return; \n"\
+"    } \n"\
+" \n"\
+"    float4 color = make_float4(0.f, 0.f, 0.f, 0.f); \n"\
+" \n"\
+"    // Add the contributions of the possible 4 lines that can cross this \n"\
+"    // pixel: \n"\
+"    float4 coords = mad(make_float4( 0.0, -a.x, 0.0,  +a.y), rcp_frame.yyyy, texcoord.xyxy); \n"\
+"    color = mad(Sampler2DBilinear(colorTex, buffer_size, coords.xy), w.x, color); \n"\
+"    color = mad(Sampler2DBilinear(colorTex, buffer_size, coords.zw), w.y, color); \n"\
+" \n"\
+"    coords = mad(make_float4(-a.z,  0.0, a.w,  0.0), rcp_frame.xxxx, texcoord.xyxy); \n"\
+"    color = mad(Sampler2DBilinear(colorTex, buffer_size, coords.xy), w.z, color); \n"\
+"    color = mad(Sampler2DBilinear(colorTex, buffer_size, coords.zw), w.w, color); \n"\
+" \n"\
+"    // Normalize the resulting color and we are finished! \n"\
+"    out_buffer[idx] = color / sum; \n"\
+"} \n"\
+" \n"\
 "#endif \n"\
 ;
 static const char* g_bxdf_opencl_inc[]= {
@@ -8865,9 +9334,9 @@ static const char* g_integrator_bdpt_opencl_inc[]= {
     g_disney_opencl,
     g_bxdf_opencl,
     g_scene_opencl,
+    g_path_opencl,
     g_light_opencl,
     g_material_opencl,
-    g_path_opencl,
     g_volumetrics_opencl,
     g_vertex_opencl,
 };
@@ -8877,6 +9346,9 @@ static const char* g_light_opencl_inc[]= {
     g_texture_opencl,
     g_common_opencl,
     g_scene_opencl,
+    g_disney_opencl,
+    g_bxdf_opencl,
+    g_path_opencl,
 };
 static const char* g_material_opencl_inc[]= {
     g_common_opencl,
@@ -8898,9 +9370,9 @@ static const char* g_monte_carlo_renderer_opencl_inc[]= {
     g_disney_opencl,
     g_bxdf_opencl,
     g_scene_opencl,
+    g_path_opencl,
     g_light_opencl,
     g_material_opencl,
-    g_path_opencl,
     g_volumetrics_opencl,
     g_vertex_opencl,
 };
@@ -8910,7 +9382,12 @@ static const char* g_normalmap_opencl_inc[]= {
     g_texture_opencl,
 };
 static const char* g_path_opencl_inc[]= {
+    g_common_opencl,
     g_payload_opencl,
+    g_utils_opencl,
+    g_texture_opencl,
+    g_disney_opencl,
+    g_bxdf_opencl,
 };
 static const char* g_path_tracing_estimator_opencl_inc[]= {
     g_common_opencl,
@@ -8924,9 +9401,9 @@ static const char* g_path_tracing_estimator_opencl_inc[]= {
     g_disney_opencl,
     g_bxdf_opencl,
     g_scene_opencl,
+    g_path_opencl,
     g_light_opencl,
     g_material_opencl,
-    g_path_opencl,
     g_volumetrics_opencl,
 };
 static const char* g_ray_opencl_inc[]= {
@@ -8951,6 +9428,10 @@ static const char* g_utils_opencl_inc[]= {
 static const char* g_volumetrics_opencl_inc[]= {
     g_common_opencl,
     g_payload_opencl,
+    g_utils_opencl,
+    g_texture_opencl,
+    g_disney_opencl,
+    g_bxdf_opencl,
     g_path_opencl,
 };
 static const char* g_wavelet_denoise_opencl_inc[]= {

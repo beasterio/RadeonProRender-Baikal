@@ -37,7 +37,7 @@ project "RadeonProRender"
         linkoptions { '/DEF:"RadeonProRender.def"' }
 
         links {"RadeonRays",}
-        links {"glew", "OpenGL32"}
+        links {"glew32s", "OpenGL32"}
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",

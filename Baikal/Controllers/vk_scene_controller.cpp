@@ -202,6 +202,33 @@ namespace Baikal
         out.meshes.resize(mesh_num);
         out.raytrace_shapes.resize(mesh_num);
 
+        auto& device = m_vulkan_device->logicalDevice;
+        VkQueue graphics_queue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
+
+        //prepare ubo with transform matrices
+        {
+            out.mesh_transform_buf.destroy();
+
+            size_t min_alignment = m_vulkan_device->properties.limits.minUniformBufferOffsetAlignment;
+            out.transform_alignment = sizeof(glm::mat4);
+            if (min_alignment > 0) {
+                out.transform_alignment = (out.transform_alignment + min_alignment - 1) & ~(min_alignment - 1);
+            }
+
+            size_t bufferSize = out.meshes.size() * out.transform_alignment;
+
+            // Uniform buffer object with per-object matrices
+            VK_CHECK_RESULT(m_vulkan_device->createBuffer(
+                VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                &out.mesh_transform_buf,
+                bufferSize));
+
+            // Map persistent
+            VK_CHECK_RESULT(out.mesh_transform_buf.map());
+        }
+
         int startIdx = 0;
         auto mesh_iter = scene.CreateShapeIterator();
         for (int i = 0; mesh_iter->IsValid(); mesh_iter->Next(), ++i)
@@ -217,6 +244,8 @@ namespace Baikal
                 mesh = dynamic_cast<Baikal::Mesh*>(inst->GetBaseShape().get());
                 continue;
             }
+            const RadeonRays::matrix transform = mesh->GetTransform().transpose();
+
             auto& raytraceShape = out.raytrace_shapes[i];
             raytraceShape.materialIndex = mat_collector.GetItemIndex(mesh->GetMaterial());
             raytraceShape.numTriangles = mesh->GetNumIndices() / 3;
@@ -295,12 +324,19 @@ namespace Baikal
                 i,
                 &rrmesh);
 
+            //setup transform
+            glm::mat4* modelMat = (glm::mat4*)(((uint64_t)out.mesh_transform_buf.mapped + (i * out.transform_alignment)));
+            memcpy(modelMat, &transform.m00, sizeof(transform));
+            rrShapeSetTransform(m_instance, rrmesh, &transform.m00);
+
             rrAttachShape(m_instance, rrmesh);
         }
 
-        auto& device = m_vulkan_device->logicalDevice;
-        VkQueue graphics_queue;
-        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
+        // Flush to make changes visible to the host 
+        VkMappedMemoryRange memoryRange = vks::initializers::mappedMemoryRange();
+        memoryRange.memory = out.mesh_transform_buf.memory;
+        memoryRange.size = out.mesh_transform_buf.size;
+        vkFlushMappedMemoryRanges(device, 1, &memoryRange);
 
         VkCommandBuffer copy_cmd = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
         AllocateOnGPU(scene, copy_cmd, out);
@@ -763,6 +799,7 @@ namespace Baikal
         // Decriptor pool
         std::vector<VkDescriptorPoolSize> poolSizes;
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(out.meshes.size())));
+        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, out.meshes.size()));
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(out.meshes.size() * 4)));
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(10)));
 
@@ -801,6 +838,11 @@ namespace Baikal
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_SHADER_STAGE_FRAGMENT_BIT,
             4));
+        // Binding 5: transform matrices
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            5));
 
         VkDescriptorSetLayoutCreateInfo descriptorLayout =
             vks::initializers::descriptorSetLayoutCreateInfo(
@@ -845,30 +887,36 @@ namespace Baikal
                 0,
                 &m_defaultUBO->descriptor));
             // Image bindings
-            // Binding 0: Color map
+            // Binding 1: Color map
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 1,
                 &out.meshes[i].material->diffuse.descriptor));
-            // Binding 1: Roughness
+            // Binding 2: Roughness
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 2,
                 &out.meshes[i].material->roughness.descriptor));
-            // Binding 2: Normal
+            // Binding 3: Normal
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 3,
                 &out.meshes[i].material->bump.descriptor));
-            // Binding 3: Metallic
+            // Binding 4: Metallic
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 4,
                 &out.meshes[i].material->metallic.descriptor));
+            // Binding 5 : Shape shader uniform buffer
+            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
+                out.meshes[i].descriptorSet,
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                5,
+                &out.mesh_transform_buf.descriptor));
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
         }
