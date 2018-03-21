@@ -54,9 +54,33 @@ namespace Baikal
 
         return valid;
     }
-    vks::Texture TranslateMaterialInput(vks::VulkanDevice* device, const std::string& input_name, Baikal::Material::Ptr mat, VkScene::Resources& res)
+
+    void GetBaikalTextureData(Texture::Ptr tex, std::string* out_name, VkFormat* out_format, int* w, int* h, void const** out_data, VkDeviceSize* out_data_size)
     {
-        vks::Texture result;
+        *out_name = tex->GetName() + "_" + std::to_string((std::uintptr_t)tex.get());
+        *w = tex->GetSize().x;
+        *h = tex->GetSize().y;
+        *out_data = tex->GetData();
+        *out_data_size = (VkDeviceSize)tex->GetSizeInBytes();
+        switch (tex->GetFormat())
+        {
+        case Texture::Format::kRgba16:
+            *out_format = VK_FORMAT_R16G16B16A16_UNORM;
+            break;
+        case Texture::Format::kRgba32:
+            *out_format = VK_FORMAT_R32G32B32A32_UINT;
+            break;
+        case Texture::Format::kRgba8:
+            *out_format = VK_FORMAT_B8G8R8A8_UNORM;
+            break;
+        default:
+            throw std::runtime_error("Error: unexpected Baikal::Texture format.");
+        }
+    }
+
+    vks::Texture* TranslateMaterialInput(vks::VulkanDevice* device, const std::string& input_name, Baikal::Material::Ptr mat, VkScene::Resources& res)
+    {
+        vks::Texture* result = nullptr;
 
         VkQueue queue;
         vkGetDeviceQueue(device->logicalDevice, device->queueFamilyIndices.graphics, 0, &queue);
@@ -73,31 +97,18 @@ namespace Baikal
             case Baikal::Material::InputType::kTexture:
             {
                 Texture::Ptr tex = input_value.tex_value;
-                std::string name = input_value.tex_value->GetName() + "_" + std::to_string((std::uintptr_t)tex.get());
+                std::string name;
+                VkFormat format;
+                int w, h;
+                void const* data;
+                VkDeviceSize data_size;
+                GetBaikalTextureData(tex, &name, &format, &w, &h, &data, &data_size);
+
                 if (!res.textures->present(name))
                 {
-                    int w = tex->GetSize().x;
-                    int h = tex->GetSize().y;
-                    VkFormat format;
-                    switch (tex->GetFormat())
-                    {
-                    case Texture::Format::kRgba16:
-                        format = VK_FORMAT_R16G16B16A16_UNORM;
-                        break;
-                    case Texture::Format::kRgba32:
-                        format = VK_FORMAT_R32G32B32A32_UINT;
-                        break;
-                    case Texture::Format::kRgba8:
-                        format = VK_FORMAT_B8G8R8A8_UNORM;
-                        break;
-                    default:
-                        throw std::runtime_error("Error: unexpected Baikal::Texture format.");
-                    }
-                    //res.textures->addTexture2D(name, name, VK_FORMAT_BC2_UNORM_BLOCK);
-                    //format = VK_FORMAT_BC2_UNORM_BLOCK;
-                    res.textures->addTexture2D(name, tex->GetData(), (VkDeviceSize)tex->GetSizeInBytes(), format, w, h, device, queue);
+                    res.textures->addTexture2D(name, data, data_size, format, w, h, device, queue);
                 }
-                result = res.textures->get(name);
+                result = res.textures->getPtr(name);
                 break;
             }
             case Baikal::Material::InputType::kFloat4:
@@ -115,7 +126,7 @@ namespace Baikal
                     VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
                     res.textures->addTexture2D(name, &color.x, sizeof(color), format, w, h, device, queue);
                 }
-                result = res.textures->get(name);
+                result = res.textures->getPtr(name);
             }
             break;
             default:
@@ -134,7 +145,7 @@ namespace Baikal
                 VkFormat format = VK_FORMAT_R32G32B32A32_SFLOAT;
                 res.textures->addTexture2D(name, &color.x, sizeof(color), format, w, h, device, queue);
             }
-            result = res.textures->get(name);
+            result = res.textures->getPtr(name);
         }
 
         return result;
@@ -162,7 +173,7 @@ namespace Baikal
     }
      
     VkSceneController::VkSceneController(vks::VulkanDevice* device, rr_instance& instance, vks::Buffer* defaultUBO)
-        : m_instance(instance)
+        : m_instance(&instance)
         , m_vulkan_device(device)
         , m_defaultUBO(defaultUBO)
     {
@@ -195,6 +206,26 @@ namespace Baikal
     // Update shape data only.
     void VkSceneController::UpdateShapes(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, Collector& vol_collector, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::SHAPES;
+        auto& device = m_vulkan_device->logicalDevice;
+
+        //cleanup RR data
+        if (!m_rr_meshes.empty())
+        {
+            //rrDetachAllShapes(m_instance);
+            //for (auto m : m_rr_meshes)
+            //{
+            //    rrDeleteShape(m_instance, m);
+            //}
+            m_rr_meshes.clear();
+
+            //TODO: remove this.
+            //rr-next don't support geometry change after commit,
+            //so recreating instance instead
+            rrShutdownInstance(*m_instance);
+            rrInitInstance(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, m_vulkan_device->computeCommandPool, m_instance);
+        }
+
         int mesh_num = scene.GetNumShapes();
         out.scene_vertices.resize(mesh_num);
         out.scene_indices.resize(mesh_num);
@@ -202,7 +233,6 @@ namespace Baikal
         out.meshes.resize(mesh_num);
         out.raytrace_shapes.resize(mesh_num);
 
-        auto& device = m_vulkan_device->logicalDevice;
         VkQueue graphics_queue;
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
 
@@ -314,7 +344,7 @@ namespace Baikal
             rr_shape rrmesh = nullptr;
 
             auto status = rrCreateTriangleMesh(
-                m_instance,
+                *m_instance,
                 &meshPositions[0].x,
                 (std::uint32_t)meshPositions.size(),
                 sizeof(RadeonRays::float3),
@@ -327,9 +357,10 @@ namespace Baikal
             //setup transform
             glm::mat4* modelMat = (glm::mat4*)(((uint64_t)out.mesh_transform_buf.mapped + (i * out.transform_alignment)));
             memcpy(modelMat, &transform.m00, sizeof(transform));
-            rrShapeSetTransform(m_instance, rrmesh, &transform.m00);
+            rrShapeSetTransform(*m_instance, rrmesh, &transform.m00);
 
-            rrAttachShape(m_instance, rrmesh);
+            rrAttachShape(*m_instance, rrmesh);
+            m_rr_meshes.push_back(rrmesh);
         }
 
         // Flush to make changes visible to the host 
@@ -342,39 +373,46 @@ namespace Baikal
         AllocateOnGPU(scene, copy_cmd, out);
         vkFreeCommandBuffers(device, m_vulkan_device->commandPool, 1, &copy_cmd);
 
-        // Commit geometry to RR
-        VkCommandBuffer rrCommitCmdBuffer;
-        rrCommit(m_instance, &rrCommitCmdBuffer);
+        {
+            // Commit geometry to RR
+            VkCommandBuffer rrCommitCmdBuffer;
+            rrCommit(*m_instance, &rrCommitCmdBuffer);
 
+            VkQueue computeQueue;
+            vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &computeQueue);
+
+            VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+
+            submitInfo.commandBufferCount = 1;
+            submitInfo.pCommandBuffers = &rrCommitCmdBuffer;
+            VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE));
+            vkQueueWaitIdle(computeQueue);
+
+        }
         out.scene_vertices.clear();
         out.scene_indices.clear();
-
-        VkQueue computeQueue;
-        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &computeQueue);
-
-        VkSubmitInfo submitInfo = vks::initializers::submitInfo();
-
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &rrCommitCmdBuffer;
-        VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE));
-        vkQueueWaitIdle(computeQueue);
 
     }
 
     // Update transform data only
     void VkSceneController::UpdateShapeProperties(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::SHAPE_PROPERTIES;
+
     }
 
     // Update lights data only.
     void VkSceneController::UpdateLights(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::LIGHTS;
+
         out.lights.clear();
         auto it = scene.CreateLightIterator();
         for (; it->IsValid(); it->Next())
         {
-            VkLight l;
             Baikal::Light::Ptr baikal_light = it->ItemAs<Baikal::Light>();
+
+            VkLight l;
             RadeonRays::float3 col = baikal_light->GetEmittedRadiance();
             RadeonRays::float3 pos = baikal_light->GetPosition();
             RadeonRays::float3 target = baikal_light->GetPosition() + baikal_light->GetDirection();
@@ -393,6 +431,8 @@ namespace Baikal
     // Update material data.
     void VkSceneController::UpdateMaterials(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::MATERIALS;
+
         auto& device = m_vulkan_device->logicalDevice;
         VkQueue queue;
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
@@ -416,11 +456,11 @@ namespace Baikal
             raytrace_material.diffuse[1] = 1.0f;
             raytrace_material.diffuse[2] = 1.0f;
 
-            out.materials[i].pipeline = out.resources.pipelines->get("scene.solid");
-            out.materials[i].diffuse = out.resources.textures->get("dummy.diffuse");
-            out.materials[i].roughness = out.resources.textures->get("dummy.specular");
-            out.materials[i].metallic = out.resources.textures->get("dialectric.metallic");
-            out.materials[i].bump = out.resources.textures->get("dummy.bump");
+            //out.materials[i].pipeline = out.resources.pipelines->get("scene.solid");
+            out.materials[i].diffuse = out.resources.textures->getPtr("dummy.diffuse");
+            out.materials[i].roughness = out.resources.textures->getPtr("dummy.specular");
+            out.materials[i].metallic = out.resources.textures->getPtr("dialectric.metallic");
+            out.materials[i].bump = out.resources.textures->getPtr("dummy.bump");
 
             out.materials[i].hasBump = false;
             out.materials[i].hasAlpha = false;
@@ -526,6 +566,44 @@ namespace Baikal
     // Update texture data only.
     void VkSceneController::UpdateTextures(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        VkQueue queue;
+        vkGetDeviceQueue(m_vulkan_device->logicalDevice, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
+
+        auto it = tex_collector.CreateIterator();
+        for (; it->IsValid(); it->Next())
+        {
+            Baikal::Texture::Ptr tex = it->ItemAs<Baikal::Texture>();
+            if (tex->IsDirty())
+            {
+                out.dirty_flags |= VkScene::DirtyFlags::TEXTURES;
+
+                std::string name;
+                VkFormat format;
+                int w, h;
+                void const* data;
+                VkDeviceSize data_size;
+                GetBaikalTextureData(tex, &name, &format, &w, &h, &data, &data_size);
+
+                //add texture if its missing.
+                if (!out.resources.textures->present(name))
+                {
+                    out.resources.textures->addTexture2D(name, data, data_size, format, w, h, m_vulkan_device, queue);
+                }
+                //get vk texture and change it data
+                else
+                {
+                    vks::Texture2D* vk_tex = static_cast<vks::Texture2D*>(out.resources.textures->getPtr(name));
+                    vk_tex->fromBuffer(data, data_size, format, w, h, m_vulkan_device, queue);
+                }
+
+                tex->SetDirty(false);
+            }
+        }
+
+        if (out.dirty_flags & VkScene::DirtyFlags::TEXTURES)
+        {
+            CreateDescriptorSets(out);
+        }
     }
 
     // Get default material
@@ -537,21 +615,29 @@ namespace Baikal
     // If m_current_scene changes
     void VkSceneController::UpdateCurrentScene(Scene1 const& scene, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::CURRENT_SCENE;
+
     }
 
     // Update volume materials
     void VkSceneController::UpdateVolumes(Scene1 const& scene, Collector& volume_collector, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::VOLUMES;
+
     }
 
     // If scene attributes changed
     void VkSceneController::UpdateSceneAttributes(Scene1 const& scene, Collector& tex_collector, VkScene& out) const
     {
+        out.dirty_flags |= VkScene::DirtyFlags::SCENE_ATTRIBUTES;
+
     }
 
 
     void VkSceneController::AllocateOnGPU(Scene1 const& scene, VkCommandBuffer copy_cmd, VkScene& out) const
     {
+        DeallocateOnGPU(out);
+
         auto& device = m_vulkan_device->logicalDevice;
         VkQueue queue;
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
@@ -790,13 +876,28 @@ namespace Baikal
         vkFreeMemory(device, staging.raytraceRNGBuffer.memory, nullptr);
     }
 
+    void VkSceneController::DeallocateOnGPU(VkScene& out) const
+    {
+        out.index_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_shape_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_material_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_RNG_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_vertex_buffer.device = m_vulkan_device->logicalDevice;
+
+        out.index_buffer.destroy();
+        out.raytrace_shape_buffer.destroy();
+        out.raytrace_material_buffer.destroy();
+        out.raytrace_RNG_buffer.destroy();
+        out.raytrace_vertex_buffer.destroy();
+    }
+
     void VkSceneController::CreateDescriptorSets(VkScene& out) const
     {
         auto& device = m_vulkan_device->logicalDevice;
         // Generate descriptor sets for all meshes
         // todo : think about a nicer solution, better suited per material?
 
-        // Decriptor pool
+        // Descriptor pool
         std::vector<VkDescriptorPoolSize> poolSizes;
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(out.meshes.size())));
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, out.meshes.size()));
@@ -808,7 +909,10 @@ namespace Baikal
                 static_cast<uint32_t>(poolSizes.size()),
                 poolSizes.data(),
                 static_cast<uint32_t>(out.meshes.size()));
-
+        if (out.descriptorPool)
+        {
+            vkDestroyDescriptorPool(device, out.descriptorPool, nullptr);
+        }
         VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &out.descriptorPool));
 
         // Shared descriptor set layout
@@ -892,25 +996,25 @@ namespace Baikal
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 1,
-                &out.meshes[i].material->diffuse.descriptor));
+                &out.meshes[i].material->diffuse->descriptor));
             // Binding 2: Roughness
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 2,
-                &out.meshes[i].material->roughness.descriptor));
+                &out.meshes[i].material->roughness->descriptor));
             // Binding 3: Normal
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 3,
-                &out.meshes[i].material->bump.descriptor));
+                &out.meshes[i].material->bump->descriptor));
             // Binding 4: Metallic
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 4,
-                &out.meshes[i].material->metallic.descriptor));
+                &out.meshes[i].material->metallic->descriptor));
             // Binding 5 : Shape shader uniform buffer
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptorSet,

@@ -140,6 +140,8 @@ static bool g_is_end_pressed = false;
 
 void ResizeHandler(GLFWwindow* window, int width, int height)
 {
+    fr_int status = RPR_SUCCESS;
+
     // Free previous resource handles.
     if (glIsTexture(texture))
     {
@@ -162,7 +164,6 @@ void ResizeHandler(GLFWwindow* window, int width, int height)
     //if (status != RPR_SUCCESS)
     //    LOG_FATAL("rprContextCreateFramebufferFromGLTexture2D failed, error ", status);
 
-    fr_int status = RPR_SUCCESS;
 
     rpr_framebuffer_desc desc;
     desc.fb_width = width;
@@ -358,7 +359,7 @@ void InitGLWindow()
     // Create GLFW window and OpenGL context.
     glfwInit();
     glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
-    glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+    //glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
     window = glfwCreateWindow(640, 480, "RprDemo", nullptr, nullptr);
     glfwMakeContextCurrent(window);
     glfwShowWindow(window);

@@ -179,10 +179,10 @@ namespace Baikal
     struct SceneMaterial
     {
         std::string name;
-        vks::Texture diffuse;
-        vks::Texture roughness;
-        vks::Texture metallic;
-        vks::Texture bump;
+        vks::Texture* diffuse;
+        vks::Texture* roughness;
+        vks::Texture* metallic;
+        vks::Texture* bump;
 
         bool hasAlpha = false;
         bool hasBump = false;
@@ -317,5 +317,22 @@ namespace Baikal
             delete resources.textures;
         }
         std::string asset_path;
+
+        enum DirtyFlags
+        {
+            NONE = 0,
+            CAMERA = 1,
+            SHAPES = 1 << 1,
+            SHAPE_PROPERTIES = 1 << 2,
+            LIGHTS = 1 << 3,
+            MATERIALS = 1 << 4,
+            TEXTURES = 1 << 5,
+            CURRENT_SCENE = 1 << 6,
+            VOLUMES = 1 << 7,
+            SCENE_ATTRIBUTES = 1 << 8,
+        };
+
+        //used to know scene is changed since last render call
+        mutable int dirty_flags = DirtyFlags::NONE;
     };
 }

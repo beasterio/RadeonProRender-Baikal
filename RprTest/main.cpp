@@ -17,7 +17,7 @@ using namespace RadeonRays;
 namespace
 {
     //control how many frames to render in tests for resulting image
-    int kRenderIterations = 256;
+    int kRenderIterations = 2;
     //default structure for Vertex data
     struct Vertex
     {
@@ -590,6 +590,257 @@ void ComplexRenderTest()
     status = rprObjectDelete(context);
     assert(status == RPR_SUCCESS);
 }
+
+void DynamicSceneTest()
+{
+    rpr_int status = RPR_SUCCESS;
+
+    //context, scene and mat. system
+    rpr_context	context;
+    status = rprCreateContext(RPR_API_VERSION, nullptr, 0, RPR_CREATION_FLAGS_ENABLE_GPU0, NULL, NULL, &context);
+    assert(status == RPR_SUCCESS);
+    rpr_material_system matsys = NULL;
+    status = rprContextCreateMaterialSystem(context, 0, &matsys);
+    assert(status == RPR_SUCCESS);
+    rpr_scene scene = NULL; status = rprContextCreateScene(context, &scene);
+    assert(status == RPR_SUCCESS);
+
+    struct Vertex
+    {
+        rpr_float pos[3];
+        rpr_float norm[3];
+        rpr_float tex[2];
+    };
+
+    Vertex cube[] =
+    {
+        { -1.0f, 1.0f, -1.0f, 0.f, 1.f, 0.f, 0.0f, 0.0f },
+        { 1.0f, 1.0f, -1.0f, 0.f, 1.f, 0.f, 1.0f, 0.0f },
+        { 1.0f, 1.0f, 1.0f , 0.f, 1.f, 0.f, 1.0f, 1.0f },
+        { -1.0f, 1.0f, 1.0f , 0.f, 1.f, 0.f, 0.0f, 1.0f },
+
+        { -1.0f, -1.0f, -1.0f , 0.f, -1.f, 0.f, 0.0f, 0.0f },
+        { 1.0f, -1.0f, -1.0f , 0.f, -1.f, 0.f, 1.0f, 0.0f },
+        { 1.0f, -1.0f, 1.0f , 0.f, -1.f, 0.f, 1.0f, 1.0f },
+        { -1.0f, -1.0f, 1.0f , 0.f, -1.f, 0.f, 0.0f, 1.0f },
+
+        { -1.0f, -1.0f, 1.0f , -1.f, 0.f, 0.f, 0.0f, 0.0f },
+        { -1.0f, -1.0f, -1.0f , -1.f, 0.f, 0.f, 1.0f, 0.0f },
+        { -1.0f, 1.0f, -1.0f , -1.f, 0.f, 0.f, 1.0f, 1.0f },
+        { -1.0f, 1.0f, 1.0f , -1.f, 0.f, 0.f, 0.0f, 1.0f },
+
+        { 1.0f, -1.0f, 1.0f ,  1.f, 0.f, 0.f, 0.0f, 0.0f },
+        { 1.0f, -1.0f, -1.0f ,  1.f, 0.f, 0.f, 1.0f, 0.0f },
+        { 1.0f, 1.0f, -1.0f ,  1.f, 0.f, 0.f, 1.0f, 1.0f },
+        { 1.0f, 1.0f, 1.0f ,  1.f, 0.f, 0.f, 0.0f, 1.0f },
+
+        { -1.0f, -1.0f, -1.0f ,  0.f, 0.f, -1.f ,0.0f, 0.0f },
+        { 1.0f, -1.0f, -1.0f ,  0.f, 0.f, -1.f ,1.0f, 0.0f },
+        { 1.0f, 1.0f, -1.0f ,  0.f, 0.f, -1.f, 1.0f, 1.0f },
+        { -1.0f, 1.0f, -1.0f ,  0.f, 0.f, -1.f, 0.0f, 1.0f },
+
+        { -1.0f, -1.0f, 1.0f , 0.f, 0.f, 1.f,0.0f, 0.0f },
+        { 1.0f, -1.0f, 1.0f , 0.f, 0.f,  1.f, 1.0f, 0.0f },
+        { 1.0f, 1.0f, 1.0f , 0.f, 0.f, 1.f, 1.0f, 1.0f },
+        { -1.0f, 1.0f, 1.0f , 0.f, 0.f, 1.f,0.0f, 1.0f },
+    };
+
+    Vertex plane[] =
+    {
+        { -15.f, 0.f, -15.f, 0.f, 1.f, 0.f, 0.f, 0.f },
+        { -15.f, 0.f,  15.f, 0.f, 1.f, 0.f, 0.f, 1.f },
+        { 15.f, 0.f,  15.f, 0.f, 1.f, 0.f, 1.f, 1.f },
+        { 15.f, 0.f, -15.f, 0.f, 1.f, 0.f, 1.f, 0.f },
+    };
+
+    rpr_int indices[] =
+    {
+        3,1,0,
+        2,1,3,
+
+        6,4,5,
+        7,4,6,
+
+        11,9,8,
+        10,9,11,
+
+        14,12,13,
+        15,12,14,
+
+        19,17,16,
+        18,17,19,
+
+        22,20,21,
+        23,20,22
+    };
+
+    rpr_int num_face_vertices[] =
+    {
+        3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    };
+
+    rpr_shape mesh = NULL; status = rprContextCreateMesh(context,
+        (rpr_float const*)&cube[0], 24, sizeof(Vertex),
+        (rpr_float const*)((char*)&cube[0] + sizeof(rpr_float) * 3), 24, sizeof(Vertex),
+        (rpr_float const*)((char*)&cube[0] + sizeof(rpr_float) * 6), 24, sizeof(Vertex),
+        (rpr_int const*)indices, sizeof(rpr_int),
+        (rpr_int const*)indices, sizeof(rpr_int),
+        (rpr_int const*)indices, sizeof(rpr_int),
+        num_face_vertices, 12, &mesh);
+
+    assert(status == RPR_SUCCESS);
+
+    rpr_shape plane_mesh = NULL; status = rprContextCreateMesh(context,
+        (rpr_float const*)&plane[0], 4, sizeof(Vertex),
+        (rpr_float const*)((char*)&plane[0] + sizeof(rpr_float) * 3), 4, sizeof(Vertex),
+        (rpr_float const*)((char*)&plane[0] + sizeof(rpr_float) * 6), 4, sizeof(Vertex),
+        (rpr_int const*)indices, sizeof(rpr_int),
+        (rpr_int const*)indices, sizeof(rpr_int),
+        (rpr_int const*)indices, sizeof(rpr_int),
+        num_face_vertices, 2, &plane_mesh);
+
+    rpr_shape mesh1 = NULL; status = rprContextCreateInstance(context, mesh, &mesh1);
+    assert(status == RPR_SUCCESS);
+
+    //translate cubes
+    matrix m = translation(float3(-2, 1, 0));
+    status = rprShapeSetTransform(mesh1, true, &m.m00);
+    assert(status == RPR_SUCCESS);
+    matrix m1 = translation(float3(2, 1, 0)) * rotation_y(0.5);
+    status = rprShapeSetTransform(mesh, true, &m1.m00);
+    assert(status == RPR_SUCCESS);
+
+    //attach shapes
+    status = rprSceneAttachShape(scene, mesh);
+    assert(status == RPR_SUCCESS);
+    status = rprSceneAttachShape(scene, mesh1);
+    assert(status == RPR_SUCCESS);
+
+    //camera
+    rpr_camera camera = NULL; status = rprContextCreateCamera(context, &camera);
+    assert(status == RPR_SUCCESS);
+    status = rprCameraLookAt(camera, 0, 3, 10, 0, 0, 0, 0, 1, 0);
+    assert(status == RPR_SUCCESS);
+    status = rprCameraSetSensorSize(camera, 22.5f, 15.f);
+    assert(status == RPR_SUCCESS);
+    status = rprCameraSetFocalLength(camera, 35.f);
+    assert(status == RPR_SUCCESS);
+    status = rprCameraSetFStop(camera, 6.4f);
+    assert(status == RPR_SUCCESS);
+    status = rprSceneSetCamera(scene, camera);
+    assert(status == RPR_SUCCESS);
+
+    status = rprContextSetScene(context, scene);
+    assert(status == RPR_SUCCESS);
+
+    //materials
+    rpr_material_node diffuse = NULL; status = rprMaterialSystemCreateNode(matsys, RPR_MATERIAL_NODE_DIFFUSE, &diffuse);
+    assert(status == RPR_SUCCESS);
+    status = rprMaterialNodeSetInputF(diffuse, "color", 0.9f, 0.9f, 0.f, 1.0f);
+    assert(status == RPR_SUCCESS);
+    rpr_image img = NULL; status = rprContextCreateImageFromFile(context, "../Resources/Textures/test_albedo1.jpg", &img);
+    assert(status == RPR_SUCCESS);
+    rpr_material_node materialNodeTexture = NULL; status = rprMaterialSystemCreateNode(matsys, RPR_MATERIAL_NODE_IMAGE_TEXTURE, &materialNodeTexture);
+    assert(status == RPR_SUCCESS);
+    status = rprMaterialNodeSetInputImageData(materialNodeTexture, "data", img);
+    assert(status == RPR_SUCCESS);
+    status = rprMaterialNodeSetInputN(diffuse, "color", materialNodeTexture);
+    assert(status == RPR_SUCCESS);
+
+    status = rprShapeSetMaterial(mesh, diffuse);
+    assert(status == RPR_SUCCESS);
+    status = rprShapeSetMaterial(mesh1, diffuse);
+    assert(status == RPR_SUCCESS);
+    status = rprShapeSetMaterial(plane_mesh, diffuse);
+    assert(status == RPR_SUCCESS);
+
+    //light
+    rpr_light light = NULL; status = rprContextCreatePointLight(context, &light);
+    assert(status == RPR_SUCCESS);
+    matrix lightm = translation(float3(0, 6, 0)) * rotation_z(3.14f);
+    status = rprLightSetTransform(light, true, &lightm.m00);
+    assert(status == RPR_SUCCESS);
+    status = rprPointLightSetRadiantPower3f(light, 100, 100, 100);
+    assert(status == RPR_SUCCESS);
+    status = rprSceneAttachLight(scene, light);
+    assert(status == RPR_SUCCESS);
+
+    //result buffer
+    rpr_framebuffer_desc desc;
+    desc.fb_width = 800;
+    desc.fb_height = 600;
+    rpr_framebuffer_format fmt = { 4, RPR_COMPONENT_TYPE_FLOAT32 };
+    rpr_framebuffer frame_buffer = NULL; status = rprContextCreateFrameBuffer(context, fmt, &desc, &frame_buffer);
+    assert(status == RPR_SUCCESS);
+    status = rprContextSetAOV(context, RPR_AOV_COLOR, frame_buffer);
+    assert(status == RPR_SUCCESS);
+    status = rprFrameBufferClear(frame_buffer);
+    assert(status == RPR_SUCCESS);
+
+    //render
+    for (int i = 0; i < kRenderIterations; ++i)
+    {
+        status = rprContextRender(context);
+        assert(status == RPR_SUCCESS);
+    }
+    status = rprFrameBufferSaveToFile(frame_buffer, "Output/DynamicScene.jpg");
+    assert(status == RPR_SUCCESS);
+
+    //update scene meshes
+    status = rprSceneAttachShape(scene, plane_mesh);
+    assert(status == RPR_SUCCESS);
+    status = rprFrameBufferClear(frame_buffer);
+    assert(status == RPR_SUCCESS);
+    //render
+    for (int i = 0; i < kRenderIterations; ++i)
+    {
+        status = rprContextRender(context);
+        assert(status == RPR_SUCCESS);
+    }
+    status = rprFrameBufferSaveToFile(frame_buffer, "Output/DynamicScene_geom.jpg");
+    assert(status == RPR_SUCCESS);
+
+    //change texture data
+    rpr_image img2 = NULL; status = rprContextCreateImageFromFile(context, "../Resources/Textures/test_normal.jpg", &img2);
+    assert(status == RPR_SUCCESS);
+    status = rprMaterialNodeSetInputImageData(materialNodeTexture, "data", img2);
+    assert(status == RPR_SUCCESS);
+    status = rprFrameBufferClear(frame_buffer);
+    assert(status == RPR_SUCCESS);
+    //render
+    for (int i = 0; i < kRenderIterations; ++i)
+    {
+        status = rprContextRender(context);
+        assert(status == RPR_SUCCESS);
+    }
+    status = rprFrameBufferSaveToFile(frame_buffer, "Output/DynamicScene_texture.jpg");
+    assert(status == RPR_SUCCESS);
+
+    //cleanup
+    FR_MACRO_CLEAN_SHAPE_RELEASE(mesh, scene);
+    FR_MACRO_CLEAN_SHAPE_RELEASE(mesh1, scene);
+    FR_MACRO_CLEAN_SHAPE_RELEASE(plane_mesh, scene);
+    FR_MACRO_SAFE_FRDELETE(img);
+    FR_MACRO_SAFE_FRDELETE(materialNodeTexture);
+    status = rprSceneDetachLight(scene, light);
+    assert(status == RPR_SUCCESS);
+    status = rprObjectDelete(light); light = NULL;
+    assert(status == RPR_SUCCESS);
+    status = rprSceneSetCamera(scene, NULL);
+    assert(status == RPR_SUCCESS);
+    rprObjectDelete(diffuse);
+    status = rprObjectDelete(scene); scene = NULL;
+    assert(status == RPR_SUCCESS);
+    status = rprObjectDelete(camera); camera = NULL;
+    assert(status == RPR_SUCCESS);
+    status = rprObjectDelete(frame_buffer); frame_buffer = NULL;
+    assert(status == RPR_SUCCESS);
+    status = rprObjectDelete(matsys); matsys = NULL;
+    assert(status == RPR_SUCCESS);
+    status = rprObjectDelete(context);
+    assert(status == RPR_SUCCESS);
+}
+
 
 void EnvLightClearTest()
 {
@@ -3969,15 +4220,16 @@ void EnvironmentOverrideTest()
 
 int main(int argc, char* argv[])
 {
-    MeshCreationTest();
-    SimpleRenderTest();
-    ComplexRenderTest();
+    //MeshCreationTest();
+    //SimpleRenderTest();
+    //ComplexRenderTest();
+    DynamicSceneTest();
     //EnvLightClearTest();
     //MemoryStatistics();
-    DefaultMaterialTest();
+    //DefaultMaterialTest();
     //NullShaderTest();
-    TiledRender();
-    AOVTest();
+    //TiledRender();
+    //AOVTest();
     //test_feature_cameraDOF();
     //test_feature_ContextImageFromData();
 
@@ -3988,7 +4240,7 @@ int main(int argc, char* argv[])
     //test_feature_shaderTypeLayered();
     //UpdateMaterial();
     //ArithmeticMul();
-    OrthoRenderTest();
+    //OrthoRenderTest();
     //BackgroundImageTest();
     //EnvironmentOverrideTest();
     //LoadObjTest("../Resources/Sponza", "sponza_pbr.obj");

@@ -30,18 +30,18 @@ namespace vks
 	/** @brief Vulkan texture base class */
 	class Texture {
 	public:
-		vks::VulkanDevice *device;
-		VkImage image;
+		vks::VulkanDevice *device = nullptr;
+		VkImage image = VK_NULL_HANDLE;
 		VkImageLayout imageLayout;
-		VkDeviceMemory deviceMemory;
-		VkImageView view;
+		VkDeviceMemory deviceMemory = VK_NULL_HANDLE;
+		VkImageView view = VK_NULL_HANDLE;
 		uint32_t width, height;
 		uint32_t mipLevels;
 		uint32_t layerCount;
 		VkDescriptorImageInfo descriptor;
 
 		/** @brief Optional sampler to use with this texture */
-		VkSampler sampler;
+		VkSampler sampler = VK_NULL_HANDLE;
 
 		/** @brief Update image descriptor from current sampler, view and image layout */
 		void updateDescriptor()
@@ -54,13 +54,22 @@ namespace vks
 		/** @brief Release all Vulkan resources held by this texture */
 		void destroy()
 		{
-			vkDestroyImageView(device->logicalDevice, view, nullptr);
-			vkDestroyImage(device->logicalDevice, image, nullptr);
-			if (sampler)
+            if (view)
+            {
+                vkDestroyImageView(device->logicalDevice, view, nullptr);
+            }
+            if (image)
+            {
+                vkDestroyImage(device->logicalDevice, image, nullptr);
+            }
+            if (sampler)
 			{
 				vkDestroySampler(device->logicalDevice, sampler, nullptr);
 			}
-			vkFreeMemory(device->logicalDevice, deviceMemory, nullptr);
+            if (deviceMemory)
+            {
+                vkFreeMemory(device->logicalDevice, deviceMemory, nullptr);
+            }
 		}
 	};
 

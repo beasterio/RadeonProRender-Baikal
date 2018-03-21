@@ -74,11 +74,15 @@ namespace Baikal
     private:
 
         void AllocateOnGPU(Scene1 const& scene, VkCommandBuffer copy_cmd, VkScene& out) const;
+        void DeallocateOnGPU(VkScene& out) const;
+
         void CreateDescriptorSets(VkScene& out) const;
 
 
         vks::VulkanDevice* m_vulkan_device;
-        rr_instance& m_instance;
+        rr_instance* m_instance;
         vks::Buffer* m_defaultUBO;
+
+        mutable std::vector<rr_shape> m_rr_meshes;
     };
 }

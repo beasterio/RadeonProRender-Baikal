@@ -27,7 +27,7 @@ namespace Baikal
         {
             case RendererType::kUnidirectionalPathTracer:
             {
-                VkRenderer* renderer = new VkRenderer(m_device, m_instance);
+                VkRenderer* renderer = new VkRenderer(m_device, &m_instance);
                 m_offscreen_buffer = renderer->GetOffscreenBuffer();
 
                 return std::unique_ptr<Renderer<VkScene>>(renderer);

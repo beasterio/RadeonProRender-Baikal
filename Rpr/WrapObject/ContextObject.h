@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include "Renderers/monte_carlo_renderer.h"
 
 #include <vector>
+#include <map>
 #include "RadeonProRender.h"
 #include "RadeonProRender_GL.h"
 
@@ -92,6 +93,6 @@ private:
     //std::vector<ConfigManager::Config> m_cfgs;
     std::vector<ConfigManager::VkConfig> m_cfgs;
     //know framefubbers used as AOV outputs
-    std::set<FramebufferObject*> m_output_framebuffers;
+    std::map<rpr_int, FramebufferObject*> m_output_framebuffers;
     SceneObject* m_current_scene;
 };

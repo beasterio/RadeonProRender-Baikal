@@ -47,9 +47,10 @@ namespace Baikal
 {
     using namespace RadeonRays;
     
-    VkRenderer::VkRenderer(vks::VulkanDevice* device, rr_instance instance)
+    VkRenderer::VkRenderer(vks::VulkanDevice* device, rr_instance* instance)
         : m_vulkan_device(device)
         , m_view_updated(true)
+        , m_output_changed(true)
         , m_depth_bias_constant(25.0f)
         , m_depth_bias_slope(25.0f)
         , m_profiler(nullptr)
@@ -59,7 +60,11 @@ namespace Baikal
         PrepareUniformBuffers();
         m_profiler = new GPUProfiler(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, 128);
 
-
+        CreatePipelineCache();
+        SetupDescriptorPool();
+        PrepareQuadBuffers();
+        SetupDescriptorSetLayout();
+        SetupVertexDescriptions();
     }
 
     VkRenderer::~VkRenderer()
@@ -79,19 +84,82 @@ namespace Baikal
     // Render the scene into the output
     void VkRenderer::Render(VkScene const& scene)
     {
-        if (!m_command_buffers.deferred)
+        bool shapes_changed = scene.dirty_flags & VkScene::SHAPES;
+        bool uniform_buffers_changed = scene.dirty_flags & VkScene::CAMERA ||
+                                        scene.dirty_flags & VkScene::LIGHTS;
+        bool scene_changed = scene.dirty_flags & VkScene::CURRENT_SCENE ||
+                                scene.dirty_flags & VkScene::SCENE_ATTRIBUTES;
+        bool textures_changed = scene.dirty_flags & VkScene::TEXTURES;
+
+        m_view_updated |= m_output_changed;
+        if (shapes_changed || m_output_changed)
         {
-            SetupDescriptorPool();
-            CreatePipelineCache();
-            PrepareBuffers(&scene);
-            SetupDescriptorSetLayout();
+            PrepareRayBuffers();
+        }
+        if (textures_changed)
+        {
+            PrepareTextureBuffers(&scene);
+        }
+
+        if (shapes_changed || scene_changed || m_output_changed || textures_changed)
+        {
             SetupDescriptorSet(&scene);
-            SetupVertexDescriptions();
+        }
+        if (shapes_changed || scene_changed || m_output_changed)
+        {
             PreparePipelines(&scene);
-            BuildDeferredCommandBuffer(&scene);
+        }
+
+        if (shapes_changed || scene_changed || m_output_changed || textures_changed)
+        {
             BuildDrawCommandBuffers();
         }
-        UpdateUniformBuffers(&scene);
+
+        if (shapes_changed || m_output_changed || textures_changed)
+        {
+            BuildDeferredCommandBuffer(&scene);
+        }
+        if (uniform_buffers_changed)
+        {
+            UpdateUniformBuffers(&scene);
+        }
+
+        scene.dirty_flags = VkScene::NONE;
+        m_output_changed = false;
+        //if (scene.dirty_flags != VkScene::NONE)
+        if (false)
+        {
+            if (scene.dirty_flags & VkScene::SHAPES)
+            {
+
+            }
+            if (scene.dirty_flags & VkScene::CURRENT_SCENE ||
+                scene.dirty_flags & VkScene::SCENE_ATTRIBUTES)
+            {
+                BuildDrawCommandBuffers();
+            }
+            if (scene.dirty_flags & VkScene::CAMERA ||
+                scene.dirty_flags & VkScene::LIGHTS)
+            {
+            }
+            if (scene.dirty_flags & VkScene::SHAPE_PROPERTIES)
+            {
+            }
+            if (scene.dirty_flags & VkScene::MATERIALS)
+            {
+            }
+            if (scene.dirty_flags & VkScene::TEXTURES)
+            {
+            }
+
+            if (scene.dirty_flags & VkScene::VOLUMES)
+            {
+            }
+
+
+
+        }
+
 
         Draw();
         m_view_updated = false;
@@ -113,6 +181,12 @@ namespace Baikal
         
     }
 
+    void VkRenderer::SetOutput(OutputType type, Output* output)
+    {
+        Renderer<VkScene>::SetOutput(type, output);
+
+        m_output_changed = true;
+    }
     void VkRenderer::Draw()
     {
         auto& device = m_vulkan_device->logicalDevice;
@@ -769,8 +843,8 @@ namespace Baikal
         }
 
         uint32_t num_rays = width * height;
-        rrBindBuffers(m_rr_instance, m_buffers.raysLocal.buffer, m_buffers.hitsLocal.buffer, num_rays);
-        auto status = rrTraceRays(m_rr_instance, RR_QUERY_INTERSECT, num_rays, &m_command_buffers.traceRays);
+        rrBindBuffers(*m_rr_instance, m_buffers.raysLocal.buffer, m_buffers.hitsLocal.buffer, num_rays);
+        auto status = rrTraceRays(*m_rr_instance, RR_QUERY_INTERSECT, num_rays, &m_command_buffers.traceRays);
     }
 
     void VkRenderer::RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow)
@@ -1488,6 +1562,11 @@ namespace Baikal
         int width = framebuffers.deferred->width;
         int height = framebuffers.deferred->height;
 
+        textures.ao.destroy();
+        textures.filteredAO.destroy();
+        textures.gi.destroy();
+        textures.filteredGI.destroy();
+
         PrepareTextureTarget(&textures.ao, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
         PrepareTextureTarget(&textures.filteredAO, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
         PrepareTextureTarget(&textures.gi, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
@@ -1497,7 +1576,11 @@ namespace Baikal
 
         // Deferred descriptor set
         {
-
+            //recreate
+            if (m_descriptor_sets.deferred)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.deferred);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -1612,6 +1695,11 @@ namespace Baikal
 
         // Shadow map descriptor set
         {
+
+            if (m_descriptor_sets.shadow)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.shadow);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -1629,6 +1717,10 @@ namespace Baikal
 
         // AO descriptor set
         {
+            if (m_descriptor_sets.ao)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.ao);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -1683,6 +1775,10 @@ namespace Baikal
 
         // GI descriptor set
         {
+            if (m_descriptor_sets.gi)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.gi);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -1737,6 +1833,10 @@ namespace Baikal
 
         // AO resolve descriptor set
         {
+            if (m_descriptor_sets.aoResolve)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.aoResolve);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -1772,6 +1872,10 @@ namespace Baikal
 
         // GI resolve descriptor set
         {
+            if (m_descriptor_sets.giResolve)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.giResolve);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -1940,6 +2044,11 @@ namespace Baikal
 
         // Bilateral filter descriptor set
         {
+            if (m_descriptor_sets.bilateralFilter)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.bilateralFilter);
+            }
+
             VkDescriptorImageInfo texDescriptorData0 =
                 vks::initializers::descriptorImageInfo(
                     framebuffers.deferred->sampler,
@@ -1987,6 +2096,10 @@ namespace Baikal
 
         // Bilateral filter AO descriptor set
         {
+            if (m_descriptor_sets.bilateralFilterAO)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.bilateralFilterAO);
+            }
             VkDescriptorImageInfo texDescriptorData0 =
                 vks::initializers::descriptorImageInfo(
                     framebuffers.deferred->sampler,
@@ -2034,6 +2147,10 @@ namespace Baikal
 
         // Texture repack filter descriptor set
         {
+            if (m_descriptor_sets.textureRepack)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.textureRepack);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -2063,6 +2180,10 @@ namespace Baikal
 
         // Debug view descriptor set
         {
+            if (m_descriptor_sets.debug)
+            {
+                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.debug);
+            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -2141,7 +2262,7 @@ namespace Baikal
                 static_cast<uint32_t>(poolSizes.size()),
                 poolSizes.data(),
                 32);
-
+        descriptorPoolInfo.flags |= VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
         VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &descriptorPool));
     }
 
@@ -2291,13 +2412,9 @@ namespace Baikal
         tex->device = m_vulkan_device;
     }
 
-    void VkRenderer::PrepareBuffers(VkScene const* scene)
+    void VkRenderer::PrepareQuadBuffers()
     {
         auto& device = m_vulkan_device->logicalDevice;
-        auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
-        auto const& framebuffers = vk_output->framebuffers;
-        int width = vk_output->width();
-        int height = vk_output->height();
 
         struct Vertex {
             float pos[3];
@@ -2343,11 +2460,71 @@ namespace Baikal
             indexBuffer.data()));
 
         models.quad.device = device;
+    }
+
+    void VkRenderer::PrepareTextureBuffers(VkScene const* scene)
+    {
+        m_buffers.textures.device = m_vulkan_device->logicalDevice;
+        m_buffers.textureData.device = m_vulkan_device->logicalDevice;
+        
+        m_buffers.textures.destroy();
+        m_buffers.textureData.destroy();
+
+        const uint32_t numTextures = (uint32_t)scene->resources.textures->resources.size();
+        const uint32_t texDescBufferSize = sizeof(Texture) * numTextures;
+
+        VK_CHECK_RESULT(m_vulkan_device->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            &m_buffers.textures,
+            texDescBufferSize));
+
+        uint32_t texDataBufferSize = 0;
+        const int numMipsToSkip = 0;
+
+        for (size_t i = 0; i < scene->materials.size(); i++)
+        {
+            vks::Texture& tex = *scene->materials[i].diffuse;
+
+            // All texture must have power of 2 size: check
+            assert(tex.width && (!(tex.width & (tex.width - 1))));
+            assert(tex.height && (!(tex.height & (tex.height - 1))));
+
+            uint32_t width = tex.width >> numMipsToSkip;
+            uint32_t height = tex.height >> numMipsToSkip;
+
+            texDataBufferSize += width * height * sizeof(std::uint32_t);
+        }
+
+        VK_CHECK_RESULT(m_vulkan_device->createBuffer(
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            &m_buffers.textureData,
+            texDataBufferSize));
+    }
+
+    void VkRenderer::PrepareRayBuffers()
+    {
+        auto& device = m_vulkan_device->logicalDevice;
+        auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
+        auto const& framebuffers = vk_output->framebuffers;
+        int width = vk_output->width();
+        int height = vk_output->height();
 
         const uint32_t numRays = width * height;
         const uint32_t rayBufferSize = numRays * sizeof(Ray);
         const uint32_t hitBufferSize = numRays * sizeof(Hit);
 
+        m_buffers.raysStaging.device = device;
+        m_buffers.raysLocal.device = device;
+        m_buffers.hitsStaging.device = device;
+        m_buffers.hitsLocal.device = device;
+        
+        m_buffers.raysStaging.destroy();
+        m_buffers.raysLocal.destroy();
+        m_buffers.hitsStaging.destroy();
+        m_buffers.hitsLocal.destroy();
+        
         VK_CHECK_RESULT(m_vulkan_device->createBuffer(
             VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
@@ -2371,38 +2548,6 @@ namespace Baikal
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
             &m_buffers.hitsLocal,
             hitBufferSize));
-
-        const uint32_t numTextures = (uint32_t)scene->resources.textures->resources.size();
-        const uint32_t texDescBufferSize = sizeof(Texture) * numTextures;
-
-        VK_CHECK_RESULT(m_vulkan_device->createBuffer(
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            &m_buffers.textures,
-            texDescBufferSize));
-
-        uint32_t texDataBufferSize = 0;
-        const int numMipsToSkip = 0;
-
-        for (size_t i = 0; i < scene->materials.size(); i++)
-        {
-            vks::Texture tex = scene->materials[i].diffuse;
-
-            // All texture must have power of 2 size: check
-            assert(tex.width && (!(tex.width & (tex.width - 1))));
-            assert(tex.height && (!(tex.height & (tex.height - 1))));
-
-            uint32_t width = tex.width >> numMipsToSkip;
-            uint32_t height = tex.height >> numMipsToSkip;
-
-            texDataBufferSize += width * height * sizeof(std::uint32_t);
-        }
-
-        VK_CHECK_RESULT(m_vulkan_device->createBuffer(
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-            &m_buffers.textureData,
-            texDataBufferSize));
     }
     
     void VkRenderer::SetupVertexDescriptions()

@@ -53,7 +53,7 @@ namespace Baikal
     {
     public:
 
-        VkRenderer(vks::VulkanDevice* device, rr_instance instance);
+        VkRenderer(vks::VulkanDevice* device, rr_instance* instance);
 
         ~VkRenderer();
 
@@ -71,7 +71,9 @@ namespace Baikal
 
         void SetRandomSeed(std::uint32_t seed) override;
        
-        rr_instance GetRRInstance() const { return m_rr_instance; }
+        void SetOutput(OutputType type, Output* output)  override;
+
+        rr_instance* GetRRInstance() const { return m_rr_instance; }
         vks::Buffer* GetOffscreenBuffer() { return &m_uniform_buffers.vsOffscreen; }
     protected:
     private:
@@ -89,7 +91,11 @@ namespace Baikal
         void SetupVertexDescriptions();
         void PrepareUniformBuffers();
         void PrepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
-        void PrepareBuffers(VkScene const* scene);
+        void PrepareQuadBuffers();
+        // recreate buffers for scene textures
+        void PrepareTextureBuffers(VkScene const* scene);
+
+        void PrepareRayBuffers();
         void UpdateUniformBuffers(VkScene const* scene);
 
 
@@ -100,7 +106,7 @@ namespace Baikal
         vks::VulkanDevice* m_vulkan_device;
 
         mutable bool m_view_updated;
-
+        mutable bool m_output_changed;
         // List of shader modules created (stored for cleanup)
         std::vector<VkShaderModule> m_shader_modules;
 
@@ -139,51 +145,51 @@ namespace Baikal
 
         struct
         {
-            VkPipeline deferred;
-            VkPipeline offscreen;
-            VkPipeline shadow;
-            VkPipeline ao;
-            VkPipeline gi;
-            VkPipeline aoResolve;
-            VkPipeline giResolve;
-            VkPipeline bilateralFilter;
-            VkPipeline textureRepack;
-            VkPipeline debug;
+            VkPipeline deferred = VK_NULL_HANDLE;
+            VkPipeline offscreen = VK_NULL_HANDLE;
+            VkPipeline shadow = VK_NULL_HANDLE;
+            VkPipeline ao = VK_NULL_HANDLE;
+            VkPipeline gi = VK_NULL_HANDLE;
+            VkPipeline aoResolve = VK_NULL_HANDLE;
+            VkPipeline giResolve = VK_NULL_HANDLE;
+            VkPipeline bilateralFilter = VK_NULL_HANDLE;
+            VkPipeline textureRepack = VK_NULL_HANDLE;
+            VkPipeline debug = VK_NULL_HANDLE;
         } m_pipelines;
 
         struct {
-            VkPipelineLayout deferred;
-            VkPipelineLayout offscreen;
-            VkPipelineLayout shadow;
-            VkPipelineLayout generateRays;
-            VkPipelineLayout aoResolve;
-            VkPipelineLayout giResolve;
-            VkPipelineLayout bilateralFilter;
-            VkPipelineLayout textureRepack;
+            VkPipelineLayout deferred = VK_NULL_HANDLE;
+            VkPipelineLayout offscreen = VK_NULL_HANDLE;
+            VkPipelineLayout shadow = VK_NULL_HANDLE;
+            VkPipelineLayout generateRays = VK_NULL_HANDLE;
+            VkPipelineLayout aoResolve = VK_NULL_HANDLE;
+            VkPipelineLayout giResolve = VK_NULL_HANDLE;
+            VkPipelineLayout bilateralFilter = VK_NULL_HANDLE;
+            VkPipelineLayout textureRepack = VK_NULL_HANDLE;
         } m_pipeline_layouts;
 
         struct {
-            VkDescriptorSetLayout deferred;
-            VkDescriptorSetLayout offscreen;
-            VkDescriptorSetLayout shadow;
-            VkDescriptorSetLayout generateRays;
-            VkDescriptorSetLayout aoResolve;
-            VkDescriptorSetLayout giResolve;
-            VkDescriptorSetLayout bilateralFilter;
-            VkDescriptorSetLayout textureRepack;
+            VkDescriptorSetLayout deferred = VK_NULL_HANDLE;
+            VkDescriptorSetLayout offscreen = VK_NULL_HANDLE;
+            VkDescriptorSetLayout shadow = VK_NULL_HANDLE;
+            VkDescriptorSetLayout generateRays = VK_NULL_HANDLE;
+            VkDescriptorSetLayout aoResolve = VK_NULL_HANDLE;
+            VkDescriptorSetLayout giResolve = VK_NULL_HANDLE;
+            VkDescriptorSetLayout bilateralFilter = VK_NULL_HANDLE;
+            VkDescriptorSetLayout textureRepack = VK_NULL_HANDLE;
         } m_descriptor_set_layouts;
 
         struct {
-            VkDescriptorSet deferred;
-            VkDescriptorSet shadow;
-            VkDescriptorSet ao;
-            VkDescriptorSet gi;
-            VkDescriptorSet aoResolve;
-            VkDescriptorSet giResolve;
-            VkDescriptorSet bilateralFilter;
-            VkDescriptorSet bilateralFilterAO;
-            VkDescriptorSet debug;
-            VkDescriptorSet textureRepack;
+            VkDescriptorSet deferred = VK_NULL_HANDLE;
+            VkDescriptorSet shadow = VK_NULL_HANDLE;
+            VkDescriptorSet ao = VK_NULL_HANDLE;
+            VkDescriptorSet gi = VK_NULL_HANDLE;
+            VkDescriptorSet aoResolve = VK_NULL_HANDLE;
+            VkDescriptorSet giResolve = VK_NULL_HANDLE;
+            VkDescriptorSet bilateralFilter = VK_NULL_HANDLE;
+            VkDescriptorSet bilateralFilterAO = VK_NULL_HANDLE;
+            VkDescriptorSet debug = VK_NULL_HANDLE;
+            VkDescriptorSet textureRepack = VK_NULL_HANDLE;
         } m_descriptor_sets;
 
         struct
@@ -244,7 +250,7 @@ namespace Baikal
         float m_depth_bias_slope;
         uint32_t m_frame_counter;
 
-        rr_instance m_rr_instance;
+        rr_instance* m_rr_instance;
         GPUProfiler* m_profiler;
 
         struct

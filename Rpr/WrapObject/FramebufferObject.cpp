@@ -36,6 +36,7 @@ FramebufferObject::FramebufferObject(ContextObject* context, Baikal::Output* out
     , m_output(out)
     , m_width(out->width())
     , m_height(out->height())
+    , m_aov_type(RPR_AOV_MAX)
 {
 
 }
@@ -47,6 +48,7 @@ FramebufferObject::FramebufferObject(CLWContext context, CLWKernel copy_kernel, 
     , m_context(context)
     , m_copy_cernel(copy_kernel)
     , m_context_obj(nullptr)
+    , m_aov_type(RPR_AOV_MAX)
 {
     Exception(RPR_ERROR_INTERNAL_ERROR, "No opengl interop for vulkan.");
     if (target != GL_TEXTURE_2D)
@@ -68,6 +70,10 @@ FramebufferObject::FramebufferObject(CLWContext context, CLWKernel copy_kernel, 
 
 FramebufferObject::~FramebufferObject()
 {
+    if (m_aov_type != RPR_AOV_MAX)
+    {
+        m_context_obj->SetAOV(m_aov_type, nullptr);
+    }
     delete m_output;
     m_output = nullptr;
 }

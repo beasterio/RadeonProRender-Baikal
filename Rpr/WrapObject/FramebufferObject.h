@@ -37,6 +37,10 @@ public:
     FramebufferObject(CLWContext context, CLWKernel copy_cernel, rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture);
     virtual ~FramebufferObject();
 
+    void SetAOVType(rpr_int aov)
+    {
+        m_aov_type = aov;
+    }
     //output
     void SetOutput(Baikal::Output* out)
     { 
@@ -62,4 +66,6 @@ private:
     CLWImage2D m_cl_interop_image;
     CLWContext m_context;
     CLWKernel m_copy_cernel;
+
+    rpr_int m_aov_type;
 };

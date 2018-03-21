@@ -169,12 +169,19 @@ void ContextObject::SetAOV(rpr_int in_aov, FramebufferObject* buffer)
     
     for (auto& c : m_cfgs)
     {
-        c.renderer->SetOutput(aov->second, buffer->GetOutput());
+        c.renderer->SetOutput(aov->second, buffer ? buffer->GetOutput() : nullptr);
     }
 
     //update registered output framebuffer
-    m_output_framebuffers.erase(old_buf);
-    m_output_framebuffers.insert(buffer);
+    m_output_framebuffers[in_aov] = buffer;
+    if (buffer)
+    {
+        buffer->SetAOVType(in_aov);
+    }
+    if (old_buf)
+    {
+        old_buf->SetAOVType(RPR_AOV_MAX);
+    }
 }
 
 
@@ -186,23 +193,7 @@ FramebufferObject* ContextObject::GetAOV(rpr_int in_aov)
         throw Exception(RPR_ERROR_UNIMPLEMENTED, "Context: requested AOV not implemented.");
     }
 
-    Baikal::Output* out = m_cfgs[0].renderer->GetOutput(aov->second);
-    if (!out)
-    {
-        return nullptr;
-    }
-    
-    //find framebuffer
-    auto it = find_if(m_output_framebuffers.begin(), m_output_framebuffers.end(), [out](FramebufferObject* buff)
-    {
-        return buff->GetOutput() == out;
-    });
-    if (it == m_output_framebuffers.end())
-    {
-        throw Exception(RPR_ERROR_INTERNAL_ERROR, "Context: unknown framebuffer.");
-    }
-
-    return *it;
+    return m_output_framebuffers.count(in_aov) == 1 ? m_output_framebuffers[in_aov] : nullptr;
 }
 
 void ContextObject::Render()
@@ -386,8 +377,10 @@ void ContextObject::PrepareScene()
 void ContextObject::PostRender()
 {
     // need to copy data from CL to GL for interop framebuffers
-    for (auto fb : m_output_framebuffers)
+    for (auto it : m_output_framebuffers)
     {
-        fb->UpdateGlTex();
+        auto fb = it.second;
+        if (fb)
+            fb->UpdateGlTex();
     }
 }
