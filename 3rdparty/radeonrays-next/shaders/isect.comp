@@ -30,23 +30,27 @@ struct BVHNode {
 };
 
 layout(set = 0, binding = 0) buffer Rays {
-  Ray rays[];
+    Ray rays[];
 };
 
 layout(set = 0, binding = 1) buffer Hits {
-  Hit hits[];
+    Hit hits[];
 };
 
-layout(set = 0, binding = 2) buffer BVH {
-  BVHNode bvh[];
+layout(set = 0, binding = 2) buffer RayCount {
+    uint ray_count[];
 };
 
-layout(set = 0, binding = 3) buffer Stack {
-  uint stack[];
+layout(set = 1, binding = 3) buffer BVH {
+    BVHNode bvh[];
 };
 
-layout (push_constant) uniform PushConstants {
-  uint N;
+layout(set = 1, binding = 4) buffer Stack {
+    uint stack[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint N;
 };
 
 layout (local_size_x = GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
@@ -130,7 +134,7 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     uint local_index = gl_LocalInvocationID.x;
 
-    if (index >= N) return;
+    if (index >= ray_count[0]) return;
 
     Ray myRay = rays[index];
     vec3 invDir = safe_invdir(myRay.direction);

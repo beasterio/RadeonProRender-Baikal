@@ -15,8 +15,8 @@
 
 using namespace RadeonRays;
 
-static std::uint32_t constexpr kMaxDescriptors = 4u;
-static std::uint32_t constexpr kMaxDescriptorSets = 2u;
+static std::uint32_t constexpr kMaxDescriptors = 32u;
+static std::uint32_t constexpr kMaxDescriptorSets = 32u;
 
 static void InitVulkan(
     Instance* instance,
@@ -80,25 +80,46 @@ rr_status rrInitInstance(
     return RR_SUCCESS;
 }
 
-rr_status rrTraceRays(
+rr_status rrSetTraceRaysPerformanceInfo(
     rr_instance inst,
-    rr_query_type query_type,
-    uint32_t num_rays,
-    VkCommandBuffer* out_command_buffer) {
+    VkQueryPool query_pool,
+    uint32_t begin_query_idx,
+    uint32_t end_query_idx) {
     auto instance = reinterpret_cast<Instance*>(inst);
-    auto cmdbuffer = instance->intersector->TraceRays(num_rays);
-    *out_command_buffer = cmdbuffer;
+    instance->intersector->SetPerformanceQueryInfo(query_pool, begin_query_idx, end_query_idx);
     return RR_SUCCESS;
 }
 
-rr_status rrOccluded(
-    rr_instance instance,
-    VkBuffer ray_buffer,
-    VkBuffer hit_buffer,
-    uint32_t num_rays,
-    VkCommandBuffer* out_command_buffer) {
-    return RR_ERROR_NOT_IMPLEMENTED;
+rr_status rrTraceRays(
+    // API instance
+    rr_instance inst,
+    // Intersect or occluded
+    rr_query_type query_type,
+    // Number or rays to trace
+    uint32_t max_rays,
+    // Resulting command buffer
+    VkCommandBuffer* out_command_buffer
+) {
+    auto instance = reinterpret_cast<Instance*>(inst);
+
+    instance->intersector->TraceRays(max_rays, *out_command_buffer);
+    return RR_SUCCESS;
 }
+
+rr_status rrBindBuffers(
+    // API instance
+    rr_instance inst,
+    // 
+    VkDescriptorBufferInfo rays,
+    VkDescriptorBufferInfo hits,
+    VkDescriptorBufferInfo ray_count
+) {
+    auto instance = reinterpret_cast<Instance*>(inst);
+
+    instance->intersector->BindBuffers(rays, hits, ray_count);
+    return RR_SUCCESS;
+}
+
 
 rr_status rrShutdownInstance(rr_instance inst) {
     if (!inst) {
@@ -191,21 +212,6 @@ rr_status rrDeleteShape(rr_instance inst, rr_shape s) {
     auto instance = reinterpret_cast<Instance*>(inst);
     auto shape = reinterpret_cast<Shape*>(s);
     delete shape;
-    return RR_SUCCESS;
-}
-
-rr_status rrBindBuffers(
-    rr_instance inst,
-    VkBuffer ray_buffer,
-    VkBuffer hit_buffer,
-    uint32_t num_rays
-) {
-    if (!inst) {
-        return RR_ERROR_INVALID_VALUE;
-    }
-
-    auto instance = reinterpret_cast<Instance*>(inst);
-    instance->intersector->BindBuffers(ray_buffer, hit_buffer, num_rays);
     return RR_SUCCESS;
 }
 

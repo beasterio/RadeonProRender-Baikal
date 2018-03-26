@@ -26,23 +26,46 @@ THE SOFTWARE.
 #include <qbvh_encoder.h>
 
 namespace RadeonRays {
+    // Various BVH type configs
+    // Binary BVH in world space
+    using BVH2 = BVH<WorldMeshObjectTraits,
+                     BVHNode,
+                     BVHNodeTraits<WorldMeshObjectTraits>,
+                     PostProcessor<WorldMeshObjectTraits,
+                                   BVHNodeTraits<WorldMeshObjectTraits>>>;
+    // QBVH in world space
+    using BVH4 = QBVH<WorldMeshObjectTraits>;
+    // Binary BVH in local space, being used in two level structure
+    using BVH2LBottom = BVH<LocalMeshObjectTraits,
+                            BVHNode,
+                            BVHNodeTraits<LocalMeshObjectTraits>,
+                            PostProcessor<LocalMeshObjectTraits,
+                                          BVHNodeTraits<WorldMeshObjectTraits>>>;
+    // Binary BVH built on bottom level BVH objects
+    using BVH2LTop = BVH<BVHObjectTraits,
+                         BVHNode,
+                         TopLevelBVHNodeTraits<BVHObjectTraits>,
+                         PostProcessor<BVHObjectTraits,
+                                       TopLevelBVHNodeTraits<BVHObjectTraits>>>;
 
-    using BVH2 = BVH<BVHNode, BVHNodeTraits>;
-    using BVH4 = QBVH;
-
-    template <typename BVH> struct BVHTraits {
-        static std::size_t GetSizeInBytes(BVH const& bvh) {
+    // BVH streaming and control
+    template <typename BVH> struct BVHTraits
+    {
+        static std::size_t GetSizeInBytes(BVH const& bvh)
+        {
             return bvh.num_nodes() * sizeof(typename BVH::NodeT);
         }
 
-        static void StreamBVH(BVH const& bvh, void* ptr) {
+        static void StreamBVH(BVH const& bvh, void* ptr)
+        {
             auto data = reinterpret_cast<typename BVH::NodeT*>(ptr);
             for (auto i = 0u; i < bvh.num_nodes(); ++i) {
                 data[i] = *bvh.GetNode(i);
             }
         }
 
-        static constexpr char const* GetGPUTraversalFileName() {
+        static constexpr char const* GetGPUTraversalFileName()
+        {
             return BVH::NodeT::kTraversalKernelFileName;
         }
     };

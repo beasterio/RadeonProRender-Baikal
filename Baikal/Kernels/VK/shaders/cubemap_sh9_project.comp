@@ -1,0 +1,114 @@
+#version 450
+#define PI 3.14159265358979323846
+#define TILE_SIZE 8
+
+struct SH9
+{
+    float sh[9];
+};
+
+struct SH9Color
+{
+    vec4 coefficients[9];
+};
+
+layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE, local_size_z = 1) in;
+layout (binding = 0, rgba16f) uniform imageCube cubemap;
+layout (binding = 1) buffer Sh9Color
+{
+    SH9Color shColor[];
+};
+
+vec3 MapXYSToDirection(uint x, uint y, uint s, int width, int height)
+{
+    float u = ((x + 0.5f) / float(width)) * 2.0f - 1.0f;
+    float v = ((y + 0.5f) / float(height)) * 2.0f - 1.0f;
+    v *= -1.0f;
+
+    vec3 dir = vec3(0.0f);
+
+    switch(s) {
+    case 0:
+        dir = normalize(vec3(1.0f, v, -u));
+        break;
+    case 1:
+        dir = normalize(vec3(-1.0f, v, u));
+        break;
+    case 2:
+        dir = normalize(vec3(u, 1.0f, -v));
+        break;
+    case 3:
+        dir = normalize(vec3(u, -1.0f, v));
+        break;
+    case 4:
+        dir = normalize(vec3(u, v, 1.0f));
+        break;
+    case 5:
+        dir = normalize(vec3(-u, v, -1.0f));
+        break;
+    }
+
+    return dir;
+}
+
+SH9 SH_Get2ndOrderCoeffs(vec3 d)
+{
+    SH9 sh9;
+
+    d = normalize(d);
+
+    float fC0, fC1, fS0, fS1, fTmpA, fTmpB, fTmpC;
+    float pz2 = d.z * d.z;
+
+    sh9.sh[0] = 0.2820947917738781f;
+    sh9.sh[2] = 0.4886025119029199f * d.z;
+    sh9.sh[6] = 0.9461746957575601f * pz2 + -0.3153915652525201f;
+    fC0 = d.x;
+    fS0 = d.y;
+    fTmpA = -0.48860251190292f;
+    sh9.sh[3] = fTmpA * fC0;
+    sh9.sh[1] = fTmpA * fS0;
+    fTmpB = -1.092548430592079f * d.z;
+    sh9.sh[7] = fTmpB * fC0;
+    sh9.sh[5] = fTmpB * fS0;
+    fC1 = d.x*fC0 - d.y*fS0;
+    fS1 = d.x*fS0 + d.y*fC0;
+    fTmpC = 0.5462742152960395f;
+    sh9.sh[8] = fTmpC * fC1;
+    sh9.sh[4] = fTmpC * fS1;
+
+    return sh9;
+}
+
+void main() 
+{
+    ivec2 size = imageSize(cubemap);
+    int num_pixels = size.x * size.y;
+
+    const uint x = gl_GlobalInvocationID.x;
+    const uint y = gl_GlobalInvocationID.y;
+    const uint face = gl_GlobalInvocationID.z;
+
+    vec3 s = (x >= size.x || y >= size.y) ? vec3(0.f) : imageLoad(cubemap, ivec3(x, y, face)).rgb;
+
+    float u = (x + 0.5f) / size.x;
+    float v = (y + 0.5f) / size.y;
+
+    u = u * 2.0f - 1.0f;
+    v = v * 2.0f - 1.0f;
+
+    const float temp = 1.0f + u * u + v * v;
+    const float weight = 4.0f / (sqrt(temp) * temp);
+
+    vec3 dir = MapXYSToDirection(x, y, face, size.x, size.y);
+
+    SH9 shBasis = SH_Get2ndOrderCoeffs(dir);
+
+    const uint idx = face * num_pixels + size.x * y + x;
+
+    for (int i = 0; i < 9; i++)
+    {
+        vec4 v = vec4(shBasis.sh[i] * s * weight, weight);
+        shColor[idx].coefficients[i] = any(isnan(s)) ? vec4(0.f) : v;
+    }
+}

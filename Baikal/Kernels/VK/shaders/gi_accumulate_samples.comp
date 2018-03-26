@@ -1,0 +1,82 @@
+// Defines
+#version 450
+#define PI 3.14159265358979323846
+#define LIGHT_COUNT 3
+#define TILE_SIZE 16
+#define INVALID_ADDR 0xffffffffu
+#define RT_EPSILON 0.3
+#define RAY_LENGTH 1000.0
+#define CMJ_CELL_SIZE 4
+#define CMJ_CELL_SAMPLE_COUNT (CMJ_CELL_SIZE * CMJ_CELL_SIZE)
+
+#define RTE_LIGHT_POINT 1
+#define RTE_LIGHT_SPOT 2
+#define RTE_LIGHT_DIRECTIONAL 3
+#define RTE_LIGHT_IBL 4
+#define RTE_LIGHT_AREA 5
+
+// Data types
+
+struct Ray
+{
+    vec3 direction;
+    uint pixelIdx;
+    vec3 origin;
+    float max_t;
+};
+
+struct Hit
+{
+    uint shape_id;
+    uint prim_id;
+    vec2 uv;
+};
+
+// Bindings
+layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout(binding = 0, rgba16f) uniform image2D resultImage;
+layout(binding = 1, rg16ui) uniform uimage2D sampleCounters;
+
+layout(binding = 2) buffer ShadowRays
+{
+    Ray shadowRays[];
+};
+layout(binding = 3) buffer RayCount
+{
+    uint rayCount;
+};
+layout(binding = 4) buffer ShadowHits
+{
+    Hit shadowHits[];
+};
+layout(binding = 5) buffer LightSamples
+{
+    vec4 lightSamples[];
+};
+
+
+void main()
+{
+    ivec2 bufferSize = imageSize(resultImage);
+
+
+    uint globalIndex = gl_GlobalInvocationID.y * bufferSize.x +
+        gl_GlobalInvocationID.x;
+    uint localIndex = gl_LocalInvocationID.y * TILE_SIZE +
+        gl_LocalInvocationID.x;
+
+
+    if (globalIndex >= rayCount)
+        return;
+
+    uint pixelIdx = shadowRays[globalIndex].pixelIdx;
+    uint shapeID = shadowHits[globalIndex].shape_id;
+    ivec2 st = ivec2(pixelIdx % bufferSize.x, pixelIdx / bufferSize.x);
+
+    if (shapeID == INVALID_ADDR && shadowRays[globalIndex].max_t != 0.f)
+    {
+        vec4 radiance = imageLoad(resultImage, st);
+        radiance += lightSamples[globalIndex];
+        imageStore(resultImage, st, radiance);
+    }
+}

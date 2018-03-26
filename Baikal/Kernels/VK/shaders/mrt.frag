@@ -10,11 +10,10 @@ layout (binding = 4) uniform sampler2D samplerMetaliness;
 
 layout (location = 0) in vec3 inNormal;
 layout (location = 1) in vec2 inUV;
-layout (location = 2) in vec3 inColor;
-layout (location = 3) in vec3 inWorldPos;
-layout (location = 4) in vec3 inTangent;
-layout (location = 5) in vec2 inMotion;
-layout (location = 6) in vec4 inProjPos;
+layout (location = 2) in vec3 inWorldPos;
+layout (location = 3) in vec3 inTangent;
+layout (location = 4) in vec2 inMotion;
+layout (location = 5) in vec4 inProjPos;
 
 layout (location = 0) out uvec4 outNormal;
 layout (location = 1) out vec4 outAlbedo;
@@ -31,11 +30,13 @@ layout(push_constant) uniform PushConsts {
     vec4 metallic;
 } pushConsts;
 
-// Spheremap Transform
-vec2 EncodeNormal(vec3 n)
+// Stereographic Projection
+vec2 EncodeNormal (vec3 n)
 {
-    vec2 enc = normalize(n.xy) * (sqrt(abs(-n.z*0.5+0.5)));
-    enc = enc * 0.5 + 0.5;
+    float scale = 1.7777f;
+    vec2 enc = n.xy / (n.z + 1.0f);
+    enc /= scale;
+    enc = enc * 0.5f + 0.5f;
     return enc;
 }
 
@@ -111,6 +112,7 @@ void main()
     vec2 encodedNormal = (EncodeNormal(nm) * 0.5f + 0.5f) * 65535.0f;
 
     outNormal = uvec4(uint(encodedNormal.x), uint(encodedNormal.y), EncodeDepthAndMeshID(inProjPos.z / inProjPos.w, pushConsts.meshID[0]));
-    outAlbedo = vec4(color.rgb, 1.0f);
+    float opacity = metaliness > 0.5 && roughness < 0.6 ? 0.0 : 1.0;
+    outAlbedo = vec4(color.rgb, opacity);
     outMotion = vec4(inMotion, roughness, metaliness);
 }

@@ -1,0 +1,16 @@
+#version 450
+#define TILE_SIZE 16
+
+layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout (binding = 0, rgba16f) uniform image2D resultImage;
+layout (binding = 1, rg16ui) uniform uimage2D sampleCounters;
+
+
+void main() 
+{
+    vec4 value = vec4(0.0, 0.0, 0.0, 0.0);
+    uvec2 samplesNum = uvec2(0, 0);
+
+    imageStore(sampleCounters, ivec2(gl_GlobalInvocationID.xy), uvec4(samplesNum, 0, 0));
+    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), value);
+}

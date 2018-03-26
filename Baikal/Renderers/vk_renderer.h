@@ -21,6 +21,10 @@ THE SOFTWARE.
 ********************************************************************/
 #pragma once
 
+//TODO: remove defines to another place
+#define LIGHT_COUNT 3
+#define VERTEX_BUFFER_BIND_ID 0
+
 #include <memory>
 #include <map>
 
@@ -28,11 +32,13 @@ THE SOFTWARE.
 #include "renderer.h"
 #include "Vulkan/VulkanDevice.hpp"
 #include "Vulkan/VulkanModel.hpp"
+#include "Vulkan/render_passes/deferred_render_pass.h"
+#include "Vulkan/render_passes/gbuffer_render_pass.h"
+#include "Vulkan/render_passes/shadow_render_pass.h"
+#include "Vulkan/profiler/gpu_profiler_view.h"
+#include "Vulkan/rteffects.h"
 
-//TODO: remove defines to another place
-#define LIGHT_COUNT 3
-//#define LIGHT_COUNT 2
-#define VERTEX_BUFFER_BIND_ID 0
+
 #include "Output/vkoutput.h"
 #include "radeonrays.h"
 #include "SceneGraph/vkscene.h"
@@ -77,9 +83,10 @@ namespace Baikal
         vks::Buffer* GetOffscreenBuffer() { return &m_uniform_buffers.vsOffscreen; }
     protected:
     private:
-        void Draw();
-        void BuildDeferredCommandBuffer(VkScene const* scene);
+        void Draw(VkScene const& scene);
+        //void BuildDeferredCommandBuffer(VkScene const* scene);
         void BuildDrawCommandBuffers();
+        void BuildCommandBuffers();
 
         void RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow);
         void PreparePipelines(VkScene const* scene);
@@ -92,6 +99,8 @@ namespace Baikal
         void PrepareUniformBuffers();
         void PrepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
         void PrepareQuadBuffers();
+        void InitRte(VkScene* scene);
+
         // recreate buffers for scene textures
         void PrepareTextureBuffers(VkScene const* scene);
 
@@ -112,84 +121,112 @@ namespace Baikal
 
         VkSemaphore m_ao_complete = VK_NULL_HANDLE;
         VkSemaphore m_gi_complete = VK_NULL_HANDLE;
-        VkSemaphore m_ao_resolve_complete = VK_NULL_HANDLE;
-        VkSemaphore m_gi_resolve_complete = VK_NULL_HANDLE;
+        //VkSemaphore m_ao_resolve_complete = VK_NULL_HANDLE;
+        //VkSemaphore m_gi_resolve_complete = VK_NULL_HANDLE;
         VkSemaphore m_bilateral_filter_complete = VK_NULL_HANDLE;
-        VkSemaphore m_bilateral_filter_ao_complete = VK_NULL_HANDLE;
-        VkSemaphore m_offscreen_semaphore = VK_NULL_HANDLE;
-        VkSemaphore m_shadow_semaphore = VK_NULL_HANDLE;
+        //VkSemaphore m_bilateral_filter_ao_complete = VK_NULL_HANDLE;
+        //VkSemaphore m_offscreen_semaphore = VK_NULL_HANDLE;
+        //VkSemaphore m_shadow_semaphore = VK_NULL_HANDLE;
         VkSemaphore m_transfer_complete = VK_NULL_HANDLE;
-        VkSemaphore m_generate_rays_complete = VK_NULL_HANDLE;
-        VkSemaphore m_gi_trace_complete[2] = { VK_NULL_HANDLE };
-        VkSemaphore m_ao_trace_complete = VK_NULL_HANDLE;
+        //VkSemaphore m_generate_rays_complete = VK_NULL_HANDLE;
+        //VkSemaphore m_gi_trace_complete[2] = { VK_NULL_HANDLE };
+        //VkSemaphore m_ao_trace_complete = VK_NULL_HANDLE;
+
 
         struct
         {
-            VkCommandBuffer deferred = VK_NULL_HANDLE;
-            VkCommandBuffer shadow[LIGHT_COUNT];
-            VkCommandBuffer transferToHost = VK_NULL_HANDLE;
-            VkCommandBuffer ao = VK_NULL_HANDLE;
-            VkCommandBuffer gi = VK_NULL_HANDLE;
-            VkCommandBuffer aoResolve = VK_NULL_HANDLE;
-            VkCommandBuffer giResolve = VK_NULL_HANDLE;
-            VkCommandBuffer aoResolveAndClear = VK_NULL_HANDLE;
-            VkCommandBuffer giResolveAndClear = VK_NULL_HANDLE;
-            VkCommandBuffer bilateralFilter = VK_NULL_HANDLE;
-            VkCommandBuffer bilateralFilterAO = VK_NULL_HANDLE;
-            VkCommandBuffer textureRepack = VK_NULL_HANDLE;
-            VkCommandBuffer debug = VK_NULL_HANDLE;
-            VkCommandBuffer traceRays = VK_NULL_HANDLE;
-            VkCommandBuffer dbg_transferRaysToHost = VK_NULL_HANDLE;
+            //VkCommandBuffer deferred = VK_NULL_HANDLE;
+            //VkCommandBuffer shadow[LIGHT_COUNT];
+            //VkCommandBuffer transferToHost = VK_NULL_HANDLE;
+            //VkCommandBuffer ao = VK_NULL_HANDLE;
+            //VkCommandBuffer gi = VK_NULL_HANDLE;
+            //VkCommandBuffer aoResolve = VK_NULL_HANDLE;
+            //VkCommandBuffer giResolve = VK_NULL_HANDLE;
+            //VkCommandBuffer aoResolveAndClear = VK_NULL_HANDLE;
+            //VkCommandBuffer giResolveAndClear = VK_NULL_HANDLE;
+            //VkCommandBuffer bilateralFilter = VK_NULL_HANDLE;
+            //VkCommandBuffer bilateralFilterAO = VK_NULL_HANDLE;
+            //VkCommandBuffer textureRepack = VK_NULL_HANDLE;
+            //VkCommandBuffer debug = VK_NULL_HANDLE;
+            //VkCommandBuffer traceRays = VK_NULL_HANDLE;
+            //VkCommandBuffer dbg_transferRaysToHost = VK_NULL_HANDLE;
             VkCommandBuffer drawCmdBuffers = VK_NULL_HANDLE;
+            VkCommandBuffer ao[3] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
+            VkCommandBuffer gi[17] = { VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE };
+            VkCommandBuffer bilateralFilter = VK_NULL_HANDLE;
+            VkCommandBuffer textureRepack = VK_NULL_HANDLE;
+            VkCommandBuffer rtClear = VK_NULL_HANDLE;
         } m_command_buffers;
 
+        ShadowRenderPass*   m_shadow_pass = nullptr;
+        GBufferRenderPass*  m_gbuffer_pass = nullptr;
+        DeferredRenderPass* m_deferred_pass = nullptr;
+        IrradianceGrid*     m_irradiance_grid = nullptr;
+
+        GPUProfilerView::QueryPair m_ao_query;
+        GPUProfilerView::QueryPair m_gi_query;
+        GPUProfilerView::QueryPair m_filter;
+
         struct
         {
-            VkPipeline deferred = VK_NULL_HANDLE;
-            VkPipeline offscreen = VK_NULL_HANDLE;
-            VkPipeline shadow = VK_NULL_HANDLE;
-            VkPipeline ao = VK_NULL_HANDLE;
-            VkPipeline gi = VK_NULL_HANDLE;
-            VkPipeline aoResolve = VK_NULL_HANDLE;
-            VkPipeline giResolve = VK_NULL_HANDLE;
+            //VkPipeline deferred = VK_NULL_HANDLE;
+            //VkPipeline offscreen = VK_NULL_HANDLE;
+            //VkPipeline shadow = VK_NULL_HANDLE;
+            //VkPipeline ao = VK_NULL_HANDLE;
+            //VkPipeline gi = VK_NULL_HANDLE;
+            //VkPipeline aoResolve = VK_NULL_HANDLE;
+            //VkPipeline giResolve = VK_NULL_HANDLE;
+            //VkPipeline bilateralFilter = VK_NULL_HANDLE;
+            //VkPipeline textureRepack = VK_NULL_HANDLE;
+            //VkPipeline debug = VK_NULL_HANDLE;
             VkPipeline bilateralFilter = VK_NULL_HANDLE;
             VkPipeline textureRepack = VK_NULL_HANDLE;
-            VkPipeline debug = VK_NULL_HANDLE;
+            VkPipeline rtClear = VK_NULL_HANDLE;
         } m_pipelines;
 
         struct {
-            VkPipelineLayout deferred = VK_NULL_HANDLE;
-            VkPipelineLayout offscreen = VK_NULL_HANDLE;
-            VkPipelineLayout shadow = VK_NULL_HANDLE;
-            VkPipelineLayout generateRays = VK_NULL_HANDLE;
-            VkPipelineLayout aoResolve = VK_NULL_HANDLE;
-            VkPipelineLayout giResolve = VK_NULL_HANDLE;
+            //VkPipelineLayout deferred = VK_NULL_HANDLE;
+            //VkPipelineLayout offscreen = VK_NULL_HANDLE;
+            //VkPipelineLayout shadow = VK_NULL_HANDLE;
+            //VkPipelineLayout generateRays = VK_NULL_HANDLE;
+            //VkPipelineLayout aoResolve = VK_NULL_HANDLE;
+            //VkPipelineLayout giResolve = VK_NULL_HANDLE;
+            //VkPipelineLayout bilateralFilter = VK_NULL_HANDLE;
+            //VkPipelineLayout textureRepack = VK_NULL_HANDLE;
             VkPipelineLayout bilateralFilter = VK_NULL_HANDLE;
             VkPipelineLayout textureRepack = VK_NULL_HANDLE;
+            VkPipelineLayout rtClear = VK_NULL_HANDLE;
         } m_pipeline_layouts;
 
         struct {
-            VkDescriptorSetLayout deferred = VK_NULL_HANDLE;
-            VkDescriptorSetLayout offscreen = VK_NULL_HANDLE;
-            VkDescriptorSetLayout shadow = VK_NULL_HANDLE;
-            VkDescriptorSetLayout generateRays = VK_NULL_HANDLE;
-            VkDescriptorSetLayout aoResolve = VK_NULL_HANDLE;
-            VkDescriptorSetLayout giResolve = VK_NULL_HANDLE;
-            VkDescriptorSetLayout bilateralFilter = VK_NULL_HANDLE;
-            VkDescriptorSetLayout textureRepack = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout deferred = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout offscreen = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout shadow = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout generateRays = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout aoResolve = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout giResolve = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout bilateralFilter = VK_NULL_HANDLE;
+            //VkDescriptorSetLayout textureRepack = VK_NULL_HANDLE;
+            VkDescriptorSetLayout bilateralFilter;
+            VkDescriptorSetLayout textureRepack;
+            VkDescriptorSetLayout rtClear;
         } m_descriptor_set_layouts;
 
         struct {
-            VkDescriptorSet deferred = VK_NULL_HANDLE;
-            VkDescriptorSet shadow = VK_NULL_HANDLE;
-            VkDescriptorSet ao = VK_NULL_HANDLE;
-            VkDescriptorSet gi = VK_NULL_HANDLE;
-            VkDescriptorSet aoResolve = VK_NULL_HANDLE;
-            VkDescriptorSet giResolve = VK_NULL_HANDLE;
+            //VkDescriptorSet deferred = VK_NULL_HANDLE;
+            //VkDescriptorSet shadow = VK_NULL_HANDLE;
+            //VkDescriptorSet ao = VK_NULL_HANDLE;
+            //VkDescriptorSet gi = VK_NULL_HANDLE;
+            //VkDescriptorSet aoResolve = VK_NULL_HANDLE;
+            //VkDescriptorSet giResolve = VK_NULL_HANDLE;
+            //VkDescriptorSet bilateralFilter = VK_NULL_HANDLE;
+            //VkDescriptorSet bilateralFilterAO = VK_NULL_HANDLE;
+            //VkDescriptorSet debug = VK_NULL_HANDLE;
+            //VkDescriptorSet textureRepack = VK_NULL_HANDLE;
             VkDescriptorSet bilateralFilter = VK_NULL_HANDLE;
-            VkDescriptorSet bilateralFilterAO = VK_NULL_HANDLE;
             VkDescriptorSet debug = VK_NULL_HANDLE;
             VkDescriptorSet textureRepack = VK_NULL_HANDLE;
+            VkDescriptorSet rtClear = VK_NULL_HANDLE;
         } m_descriptor_sets;
 
         struct
@@ -236,10 +273,13 @@ namespace Baikal
         } vertices;
 
         struct {
-            vks::Texture2D ao;
-            vks::Texture2D filteredAO;
-            vks::Texture2D gi;
-            vks::Texture2D filteredGI;
+            //vks::Texture2D ao;
+            //vks::Texture2D filteredAO;
+            //vks::Texture2D gi;
+            //vks::Texture2D filteredGI;
+            vks::Texture2D sampleCounters;       // xyz - GI and w - AO
+            vks::Texture2D traceResults;         // xyz - GI and w - AO
+            vks::Texture2D filteredTraceResults; // xyz - GI and w - AO
         } textures;
 
         VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
@@ -251,7 +291,9 @@ namespace Baikal
         uint32_t m_frame_counter;
 
         rr_instance* m_rr_instance;
+        rte_instance m_rte_instance;
         GPUProfiler* m_profiler;
+        //GPUProfilerView m_profiler_view;
 
         struct
         {

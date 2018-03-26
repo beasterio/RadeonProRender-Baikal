@@ -1,0 +1,68 @@
+#version 450
+#define PI 3.14159265358979323846
+#define TILE_SIZE 2
+
+struct SH9Color
+{
+    vec4 coefficients[9];
+};
+
+layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE, local_size_z = 1) in;
+layout (binding = 0) buffer Sh9ColorSrc
+{
+    SH9Color srcShColor[];
+};
+
+layout (binding = 1) buffer Sh9ColorDst
+{
+    SH9Color dstShColor[];
+};
+
+layout(push_constant) uniform PushConsts
+{
+    int src_width;
+    int src_height;
+    int dst_width;
+    int dst_height;
+} pushConsts;
+
+void main() 
+{
+    const int dst_width = pushConsts.dst_width;
+    const int dst_height = pushConsts.dst_height;
+    const int dst_num_pixels = dst_width * dst_height;
+
+    const int src_width = pushConsts.src_width;
+    const int src_height = pushConsts.src_height;
+    const int src_num_pixels = src_width * src_height;
+
+    const uint x = gl_GlobalInvocationID.x;
+    const uint y = gl_GlobalInvocationID.y;
+    const uint face = gl_GlobalInvocationID.z; 
+
+    if (x >= dst_width || y >= dst_height) return;
+
+    uint idx[4] = { face * src_num_pixels + 2 * src_width * y + 2 * x,
+                    face * src_num_pixels + 2 * src_width * y + 2 * x + 1,
+                    face * src_num_pixels + 2 * src_width * y + 2 * x + src_width,
+                    face * src_num_pixels + 2 * src_width * y + 2 * x + src_width + 1 };
+
+    const uint dst_idx = face * dst_num_pixels + dst_width * y + x;
+    
+    for (int j = 0; j < 9; j++)
+    {
+        dstShColor[dst_idx].coefficients[j] = vec4(0.f);
+    }
+
+    for (int i = 0; i < 4; i++)
+    {
+        if (idx[i] > src_num_pixels * (face + 1)) continue;
+
+        SH9Color src_sh = srcShColor[idx[i]];
+
+        for (int j = 0; j < 9; j++)
+        {
+            dstShColor[dst_idx].coefficients[j] += src_sh.coefficients[j];
+        }
+    }
+}

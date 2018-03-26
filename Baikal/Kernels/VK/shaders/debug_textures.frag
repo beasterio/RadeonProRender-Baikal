@@ -70,7 +70,7 @@ vec4 Texture_Sample2D(uint textureIdx, vec2 uv)
    vec4 val01 = Fetch_UnpackedTextureData(offset + width * y0 + x1);
    vec4 val10 = Fetch_UnpackedTextureData(offset + width * y1 + x0);
    vec4 val11 = Fetch_UnpackedTextureData(offset + width * y1 + x1);
-    
+
    return mix(mix(val00, val01, wx), mix(val10, val11, wx), wy);
 }
 

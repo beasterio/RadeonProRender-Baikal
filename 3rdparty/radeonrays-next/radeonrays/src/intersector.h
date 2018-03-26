@@ -28,10 +28,14 @@ namespace RadeonRays {
     public:
         Intersector() = default;
         virtual ~Intersector() = default;
-
-        virtual void BindBuffers(vk::Buffer rays, vk::Buffer hits, std::uint32_t num_rays) = 0;
         virtual vk::CommandBuffer Commit(World const& world) = 0;
-        virtual vk::CommandBuffer TraceRays(std::uint32_t num_rays) = 0;
+        virtual void BindBuffers(VkDescriptorBufferInfo rays,
+            VkDescriptorBufferInfo hits,
+            VkDescriptorBufferInfo ray_count) = 0;
+        virtual void TraceRays(std::uint32_t max_rays,
+                               VkCommandBuffer& command_buffer) = 0;
+
+        virtual void SetPerformanceQueryInfo(VkQueryPool query_pool, uint32_t begin_query, uint32_t end_query) = 0;
 
         Intersector(Intersector const&) = delete;
         Intersector& operator = (Intersector const&) = delete;

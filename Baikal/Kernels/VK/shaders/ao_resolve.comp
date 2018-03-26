@@ -31,7 +31,13 @@ struct Hit
 
 layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
 layout (binding = 0, rgba16f) uniform image2D resultImage;
-layout (binding = 1) uniform UBO 
+layout (binding = 1, rg16ui) uniform uimage2D sampleCounters;
+layout (binding = 2) buffer Hits 
+{
+  Hit hits[];
+};
+
+layout (binding = 3) uniform UBO 
 {
     vec4 viewPos;
     mat4 view;
@@ -40,14 +46,6 @@ layout (binding = 1) uniform UBO
     vec4 params;
     Light lights[LIGHT_COUNT];
 } ubo;
-layout(binding = 2) buffer Hits 
-{
-  Hit hits[];
-};
-
-layout(push_constant) uniform PushConsts {
-	int clear;
-} pushConsts;
 
 
 void main() 
@@ -56,14 +54,16 @@ void main()
     uint flatGroupIndex = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
     uint rayIndex = flatGroupIndex * groupSize + gl_LocalInvocationID.y * TILE_SIZE + gl_LocalInvocationID.x;
 
-    vec4 value = pushConsts.clear == 1 ? vec4(0.0f) : imageLoad(resultImage, ivec2(gl_GlobalInvocationID.xy));
+    vec4 value = imageLoad(resultImage, ivec2(gl_GlobalInvocationID.xy));
+    uvec2 samplesNum = imageLoad(sampleCounters, ivec2(gl_GlobalInvocationID.xy)).xy;
+
+    samplesNum.x += 1;
 
     if (hits[rayIndex].shape_id == INVALID_ADDR)
     {
-        value.xyz += 1.0;
+        value.w += 1.0;
     }
 
-    value.w += 1.0;
-
+    imageStore(sampleCounters, ivec2(gl_GlobalInvocationID.xy), uvec4(samplesNum, 0, 0));
     imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), value);
 }

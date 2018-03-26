@@ -42,6 +42,7 @@ struct VkMemoryAlloc {
         vk::DeviceSize offset;
         // Block size
         vk::DeviceSize size;
+        vk::DeviceSize real_size;
         // Block memory type
         int memory_type_index;
 
@@ -55,6 +56,7 @@ struct VkMemoryAlloc {
             , buffer(b)
             , offset(o)
             , size(s)
+            , real_size(s)
             , memory_type_index(midx) {}
     };
 
@@ -149,6 +151,16 @@ inline VkMemoryAlloc::StorageBlock VkMemoryAlloc::allocate(
         iter = emp.first;
     }
 
+    auto buffer_create_info = vk::BufferCreateInfo{}
+        .setUsage(usage)
+        .setSharingMode(vk::SharingMode::eExclusive)
+        .setSize(size);
+
+    auto buffer = device_.createBuffer(buffer_create_info);
+    auto mem_reqs = device_.getBufferMemoryRequirements(buffer);
+    auto real_size = mem_reqs.size;
+    auto real_alignment = mem_reqs.alignment;
+
     // Here we have a valid header
     auto& header = iter->second;
     // Try to find free block in the list of free blocks
@@ -156,12 +168,12 @@ inline VkMemoryAlloc::StorageBlock VkMemoryAlloc::allocate(
     auto free_block_iter = std::find_if(
         header.free_blocks_.cbegin(),
         header.free_blocks_.cend(),
-        [alignment, size](StorageBlock const& block) ->bool {
+        [real_alignment, real_size](StorageBlock const& block) ->bool {
         // Aligned offset
-        auto aligned_offset = align(block.offset, alignment);
+        auto aligned_offset = align(block.offset, real_alignment);
         // Size adjusted according w/ alignmnet difference
-        auto aligned_size = block.size - (aligned_offset - block.offset);
-        return aligned_size >= size;
+        auto aligned_size = block.real_size - (aligned_offset - block.offset);
+        return aligned_size >= real_size;
     });
 
     // If we have not found a free block, we 
@@ -198,24 +210,22 @@ inline VkMemoryAlloc::StorageBlock VkMemoryAlloc::allocate(
     header.free_blocks_.erase(free_block_iter);
 
     // Adjust block offset w/ alignment
-    free_block.offset = align(free_block.offset, alignment);
+    free_block.buffer = buffer;
+    free_block.offset = align(free_block.offset, real_alignment);
     // Set block size
     free_block.size = size;
+    free_block.real_size = real_size;
 
     // We have rest_block.size - free_block.size memory left in the block
     // so we put it into new block and insert.
-    auto memory_left_in_block = rest_block.size - free_block.size;
+    auto memory_left_in_block = rest_block.real_size - free_block.real_size;
     if (memory_left_in_block > 0) {
-        rest_block.offset = free_block.offset + free_block.size;
+        rest_block.offset = free_block.offset + free_block.real_size;
         rest_block.size = memory_left_in_block;
+        rest_block.real_size = memory_left_in_block;
         header.free_blocks_.push_back(rest_block);
     }
 
-    auto buffer_create_info = vk::BufferCreateInfo{}
-        .setUsage(usage)
-        .setSharingMode(vk::SharingMode::eExclusive)
-        .setSize(free_block.size);
-    free_block.buffer = device_.createBuffer(buffer_create_info);
     device_.bindBufferMemory(
         free_block.buffer,
         free_block.memory,

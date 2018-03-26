@@ -12,6 +12,7 @@ project "RadeonProRender"
     removefiles{"../Baikal/main.cpp","../Baikal/main_benchmark.cpp", "../Baikal/ImGUI/imgui_impl_glfw_gl3.cpp"}
     includedirs{    "../RadeonRays/RadeonRays/include", 
                     "../RadeonRays/CLW", 
+                    "../Baikal/Vulkan",
                     "../Baikal", 
                     "../BaikalStandalone", 
                     "../3rdparty",
@@ -51,6 +52,7 @@ project "RadeonProRender"
         configuration {}
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
+                "_USE_MATH_DEFINES",
                 "NOMINMAX"}
     end
 

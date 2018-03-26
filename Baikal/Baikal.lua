@@ -6,11 +6,10 @@ project "Baikal"
             "../3rdparty/radeonrays-next/radeonrays/**.h", 
             "../3rdparty/radeonrays-next/radeonrays/**.cpp",
              }
-    excludes {"../Baikal/Vulkan/vulkanexamplebase.cpp", 
-            -- "../Baikal/Vulkan/vulkanexamplebase.h", "../Baikal/Vulkan/VulkanDebug.cpp",
-            }
+	excludes{"../Baikal/Vulkan/profiler/gpu_profiler_view.cpp"}
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", 
+                "../Baikal/Vulkan",
                 "../3rdparty",
                 "../3rdparty/radeonrays-next/radeonrays/inc",
                 "../3rdparty/radeonrays-next/radeonrays/src",
@@ -41,6 +40,7 @@ project "Baikal"
                     "../3rdparty/glfw/lib/%{cfg.platform}" }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
+        		"_USE_MATH_DEFINES",
                 "NOMINMAX"}
         configuration {"Debug"}
             links {"OpenImageIOD"}

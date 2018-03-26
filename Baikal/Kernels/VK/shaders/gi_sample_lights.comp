@@ -1,0 +1,737 @@
+// Defines
+#version 450
+#define PI 3.14159265358979323846
+#define LIGHT_COUNT 3
+#define TILE_SIZE 16
+#define INVALID_ADDR 0xffffffffu
+#define RT_EPSILON 0.5
+#define RAY_LENGTH 1000.0
+#define CMJ_CELL_SIZE 4
+#define CMJ_CELL_SAMPLE_COUNT (CMJ_CELL_SIZE * CMJ_CELL_SIZE)
+
+#define RTE_LIGHT_POINT 1
+#define RTE_LIGHT_SPOT 2
+#define RTE_LIGHT_DIRECTIONAL 3
+#define RTE_LIGHT_IBL 4
+#define RTE_LIGHT_AREA 5
+
+// Data types
+struct Light
+{
+    vec4 position;
+    vec4 target;
+    vec4 color;
+    mat4 viewMatrix;
+};
+
+struct Ray
+{
+    vec3 direction;
+    uint pixelIdx;
+    vec3 origin;
+    float max_t;
+};
+
+struct Hit
+{
+    uint shape_id;
+    uint prim_id;
+    vec2 uv;
+};
+
+struct BRDFInputs
+{
+    vec3 albedo;
+    float roughness;
+    float metallic;
+    float transparency;
+};
+
+struct Shape
+{
+    uint indexOffset;
+    uint numTriangles;
+    uint materialIndex;
+    uint unused;
+};
+
+struct Texture
+{
+    uint w, h;
+    uint dataOffset;
+    uint unused;
+};
+
+struct Material
+{
+    vec3 diffuse;
+    uint diffuseMap;
+    vec3 specular;
+    uint specularMap;
+    float roughness;
+    uint roughnessMap;
+    float metalness;
+    uint metalnessMap;
+};
+
+struct RtLight
+{
+    vec3 position;
+    uint type;
+    vec4 intensity;
+    vec3 direction;
+    uint areaLightShapeIdx;
+    vec2 spotAngles;
+    float iblMultiplier;
+    uint iblTexture;
+};
+
+struct Vertex
+{
+    vec4 posUVx;
+    vec4 normalUVy;
+    vec4 tangent;
+};
+
+// Bindings
+layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout(set = 0, binding = 0) uniform usampler2D gBuffer0;
+layout(set = 0, binding = 1) uniform sampler2D gBuffer1;
+layout(set = 0, binding = 2) uniform sampler2D gBuffer2;
+layout(set = 0, binding = 3, rgba16f) uniform image2D resultImage;
+layout(set = 0, binding = 4, rg16ui) uniform uimage2D sampleCounters;
+layout(set = 1, binding = 5) buffer Rays
+{
+    Ray rays[];
+}; 
+layout(set = 1, binding = 6) buffer RayCount
+{
+    uint rayCount;
+};
+layout(set = 0, binding = 7) buffer Hits
+{
+    Hit hits[];
+};
+layout(set = 0, binding = 8) uniform UBO
+{
+    vec4 viewPos;
+    mat4 view;
+    mat4 invView;
+    mat4 invProj;
+    vec4 params;
+    Light lights[LIGHT_COUNT];
+} ubo;
+layout(set = 0, binding = 9) buffer Shapes
+{
+    Shape shapes[];
+};
+layout(set = 0, binding = 10) buffer Materials
+{
+    Material materials[];
+};
+layout(set = 0, binding = 11) buffer IndexData
+{
+    uint indices[];
+};
+layout(set = 0, binding = 12, std430) buffer VertexData
+{
+    Vertex vertices[];
+};
+layout(set = 0, binding = 13) buffer TextureDescriptors
+{
+    Texture textures[];
+};
+layout(set = 0, binding = 14) buffer TextureData
+{
+    uint textureData[];
+};
+layout(set = 0, binding = 15) buffer Throughput
+{
+    vec4 throughput[];
+};
+
+layout(set = 0, binding = 16) buffer Rng
+{
+    uint rng[];
+};
+layout(set = 0, binding = 17) buffer Lights
+{
+    RtLight rt_lights[];
+};
+layout(set = 0, binding = 18) buffer OutShadowRays
+{
+    Ray outShadowRays[];
+};
+layout(set = 0, binding = 19) buffer OutLightSamples
+{
+    vec4 outLightSamples[];
+};
+layout(set = 1, binding = 20) buffer RaysOut
+{
+   Ray raysOut[];
+};
+layout(set = 1, binding = 21) buffer RayCountOut
+{
+   uint rayCountOut;
+};
+
+layout(push_constant) uniform PushConsts
+{
+    uint numLights;
+} pushConsts;
+
+// Util functions
+// CMJ sampling
+uint Permute(uint i, uint l, uint p)
+{
+    uint w = l - 1;
+    w |= w >> 1;
+    w |= w >> 2;
+    w |= w >> 4;
+    w |= w >> 8;
+    w |= w >> 16;
+
+    do
+    {
+        i ^= p;
+        i *= 0xe170893d;
+        i ^= p >> 16;
+        i ^= (i & w) >> 4;
+        i ^= p >> 8;
+        i *= 0x0929eb3f;
+        i ^= p >> 23;
+        i ^= (i & w) >> 1;
+        i *= 1 | p >> 27;
+        i *= 0x6935fa69;
+        i ^= (i & w) >> 11;
+        i *= 0x74dcb303;
+        i ^= (i & w) >> 2;
+        i *= 0x9e501cc3;
+        i ^= (i & w) >> 2;
+        i *= 0xc860a3df;
+        i &= w;
+        i ^= i >> 5;
+    } while (i >= l);
+    return (i + p) % l;
+}
+
+float RandFloat(uint i, uint p)
+{
+    i ^= p;
+    i ^= i >> 17;
+    i ^= i >> 10;
+    i *= 0xb36534e5;
+    i ^= i >> 12;
+    i ^= i >> 21;
+    i *= 0x93fc4795;
+    i ^= 0xdf6e307f;
+    i ^= i >> 17;
+    i *= 1 | p >> 18;
+    return i * (1.0 / 4294967808.0);
+}
+
+vec2 SampleCMJ(uint s, uint n, uint p)
+{
+    uint sx = Permute(s % n, n, p * 0xa511e9b3);
+    uint sy = Permute(s / n, n, p * 0x63d83595);
+    float jx = RandFloat(s, p * 0xa399d265);
+    float jy = RandFloat(s, p * 0x711ad6a5);
+
+    return vec2((s % n + (sy + jx) / n) / n, (s / n + (sx + jy) / n) / n);
+}
+
+// Stereographic Projection
+vec3 DecodeNormal (uvec2 enc)
+{
+    vec2 enc_n = vec2(enc.xy) / 65535.0f;
+    enc_n = enc_n * 2.0f - vec2(1.0f);
+
+    float scale = 1.7777f;
+    vec3 nn = enc_n.xyy * vec3(2.0f*scale, 2.0f * scale, 0.0f) + vec3(-scale,-scale,1);
+    float g = 2.0f / dot(nn.xyz,nn.xyz);
+    vec3 n;
+    n.xy = g*nn.xy;
+    n.z = g-1;
+
+    return n;
+}
+
+vec3 ReconstructVSPositionFromDepth(vec2 uv, float depth)
+{
+    uv = uv * vec2(2.0f, 2.0f) - vec2(1.0f, 1.0f);
+
+    vec4 projPos = vec4(uv, depth, 1.0f);
+    vec4 viewPos = ubo.invProj * projPos;
+
+    return viewPos.xyz / viewPos.w;
+}
+
+// Decode depth z/w - 24 bits, mesh id - 8 bits
+vec2 DecodeDepthAndMeshID(uvec2 data)
+{
+    float meshID = float(data.y & 0xFF);
+    uint depthHighBits = ((data.y >> 8) & 0xFF) << 16;
+    float depth = float(depthHighBits | data.x) / 16777215.0f;
+
+    return vec2(depth, meshID);
+}
+
+vec4 Fetch_UnpackedTextureData(uint offset)
+{
+    uint data = textureData[offset];
+    uvec4 unpacked_data = uvec4(data & 0x000000FF,
+        (data & 0x0000FF00) >> 8,
+        (data & 0x00FF0000) >> 16,
+        (data & 0xFF000000) >> 24);
+
+    return vec4(unpacked_data / 255.0f);
+}
+
+vec4 Texture_Sample2D(uint textureIdx, vec2 uv)
+{
+    // Get width and height
+    uint width = textures[textureIdx].w;
+    uint height = textures[textureIdx].h;
+    uint offset = textures[textureIdx].dataOffset;
+
+    // Handle UV wrap
+    uv -= floor(uv);
+
+    // Reverse Y:
+    // it is needed as textures are loaded with Y axis going top to down
+    // and our axis goes from down to top
+    // uv.y = 1.0 - uv.y;
+
+    // Calculate integer coordinates
+    uint x0 = clamp(uint(floor(uv.x * width)), 0, width - 1);
+    uint y0 = clamp(uint(floor(uv.y * height)), 0, height - 1);
+
+    // Calculate samples for linear filtering
+    uint x1 = clamp(x0 + 1, 0, width - 1);
+    uint y1 = clamp(y0 + 1, 0, height - 1);
+
+    // Calculate weights for linear filtering
+    float wx = uv.x * width - floor(uv.x * width);
+    float wy = uv.y * height - floor(uv.y * height);
+
+    vec4 val00 = Fetch_UnpackedTextureData(offset + width * y0 + x0);
+    vec4 val01 = Fetch_UnpackedTextureData(offset + width * y0 + x1);
+    vec4 val10 = Fetch_UnpackedTextureData(offset + width * y1 + x0);
+    vec4 val11 = Fetch_UnpackedTextureData(offset + width * y1 + x1);
+
+    return mix(mix(val00, val01, wx), mix(val10, val11, wx), wy);
+}
+
+vec3 OrthoVector(vec3 n)
+{
+    vec3 p;
+
+    if (abs(n.z) > 0.0)
+    {
+        float k = sqrt(n.y*n.y + n.z*n.z);
+        p.x = 0; p.y = -n.z / k; p.z = n.y / k;
+    }
+    else
+    {
+        float k = sqrt(n.x*n.x + n.y*n.y);
+        p.x = n.y / k; p.y = -n.x / k; p.z = 0;
+    }
+
+    return p;
+}
+
+vec3 MapToHemisphere(vec2 s, vec3 N, float e)
+{
+    // Construct basis
+    vec3 U = OrthoVector(N);
+    vec3 V = cross(U, N);
+    U = cross(N, V);
+
+    // Calculate 2D sample
+    float r1 = s.x;
+    float r2 = s.y;
+
+    // Transform to spherical coordinates
+    float sinPsi = sin(2.0*PI*r1);
+    float cosPsi = cos(2 * PI*r1);
+    float cosTheta = pow(1.0 - r2, 1.0 / (e + 1.0));
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+    // Return the result
+    return normalize(U * sinTheta * cosPsi + V * sinTheta * sinPsi + N * cosTheta);
+}
+
+// Material functions
+vec3 GGX_Sample(vec2 s, float roughness, vec3 V, vec3 N)
+{
+    float a = roughness * roughness;
+    float Phi = 2.0 * PI * s.x;
+    float CosTheta = sqrt((1 - s.y) / (1 + (a*a - 1) * s.y));
+    float SinTheta = sqrt(1 - CosTheta * CosTheta);
+
+    vec3 H = vec3(SinTheta * cos(Phi), CosTheta, SinTheta * sin(Phi));
+    vec3 T = OrthoVector(N);
+    vec3 B = cross(T, N);
+    T = cross(N, B);
+
+    H = T * H.x + B * H.z + N * H.y;
+
+    return -V + 2.0*abs(dot(V, H)) * H;
+}
+
+float GGX_D(float roughness, float NdotH)
+{
+    float a2 = roughness * roughness;
+    float v = (NdotH * NdotH * (a2 - 1) + 1);
+    return a2 / (PI * v * v);
+}
+
+float GGX_G1(vec3 N, vec3 V, float k)
+{
+    const float NdotV = clamp(dot(N, V), 0.0, 1.0);
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+
+float GGX_G(float roughness, vec3 N, vec3 V, vec3 L)
+{
+    const float t = roughness + 1.0;
+    const float k = t * t / 8.0;
+
+    return GGX_G1(N, V, k) * GGX_G1(N, L, k);
+}
+
+vec3 FresnelSchlick(vec3 albedo, vec3 H, vec3 V)
+{
+    const float VdotH = clamp(dot(V, H), 0.0, 1.0);
+    return (albedo + (1.0f - albedo) * pow(1.0 - VdotH, 5.0));
+}
+
+vec3 BRDF_Evaluate(BRDFInputs inputs,
+                   vec3 V,
+                   vec3 N,
+                   vec3 L)
+{
+    vec3 specAlbedo = mix(vec3(0.03f), inputs.albedo, inputs.metallic);
+
+    vec3 H = normalize(L + V);
+    float NdotV = clamp(dot(N, V), 0.0, 1.0);
+    float NdotH = clamp(dot(N, H), 0.0, 1.0);
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+
+    vec3 diffuse = (1.0 - inputs.metallic) * inputs.albedo.xyz / PI;
+
+    float D = GGX_D(inputs.roughness, NdotH);
+    float G = GGX_G(inputs.roughness, N, V, L);
+    vec3  F = FresnelSchlick(specAlbedo, H, V);
+    vec3 specular = (D * G * F) / (4.0f * NdotL * NdotV);
+
+    return diffuse + specular;
+}
+
+float BRDF_GetPdf(BRDFInputs inputs,
+    vec3 V,
+    vec3 N,
+    vec3 L)
+{
+    vec3 specAlbedo = mix(vec3(0.03f), inputs.albedo, inputs.metallic);
+
+    vec3 H = normalize(L + V);
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    float NdotH = clamp(dot(N, H), 0.0, 1.0);
+    float VdotH = clamp(dot(V, H), 0.0, 1.0);
+    float D = GGX_D(inputs.roughness, NdotH);
+
+    float diffusePdf = (1.0 - inputs.metallic) * NdotL / PI;
+    float specularPdf = inputs.metallic * D * NdotH / (4.0 * VdotH);
+
+    return diffusePdf + specularPdf;
+}
+
+vec3 BRDF_Sample(BRDFInputs inputs,
+                 vec3 s,
+                 vec3 V,
+                 vec3 N,
+                 out vec3 L,
+                 out float pdf)
+{
+    if (s.z < inputs.metallic)
+    {
+        L = GGX_Sample(s.xy, inputs.roughness, V, N);
+    }
+    else
+    {
+        L = MapToHemisphere(s.xy, N, 1.0);
+    }
+
+    pdf = BRDF_GetPdf(inputs, V, N, L);
+    return BRDF_Evaluate(inputs, V, N, L);
+}
+
+// Light functions
+vec3 AreaLight_Sample(RtLight light,
+                      vec3 s,
+                      vec3 P,
+                      vec3 N,
+                      out vec3 L,
+                      out float dist,
+                      out float pdf)
+{
+    uint shapeID = light.areaLightShapeIdx;
+    Shape shape = shapes[shapeID];
+
+    uint primID = clamp(uint(s.z * shape.numTriangles), 0u, shape.numTriangles - 1u);
+
+    vec2 bc = vec2(1.0 - sqrt(s.x), s.y * sqrt(s.x));
+
+    uint idx0 = indices[shape.indexOffset + 3 * primID];
+    uint idx1 = indices[shape.indexOffset + 3 * primID + 1];
+    uint idx2 = indices[shape.indexOffset + 3 * primID + 2];
+
+    Vertex vertexData[3] = { vertices[idx0], vertices[idx1], vertices[idx2] };
+
+    vec3 v0 = vertexData[0].posUVx.xyz;
+    vec3 v1 = vertexData[1].posUVx.xyz;
+    vec3 v2 = vertexData[2].posUVx.xyz;
+
+    vec3 n0 = vertexData[0].normalUVy.xyz;
+    vec3 n1 = vertexData[1].normalUVy.xyz;
+    vec3 n2 = vertexData[2].normalUVy.xyz;
+
+    vec3 LP = (1.0 - bc.x - bc.y) * v0 + bc.x * v1 + bc.y * v2;
+    vec3 LN = (1.0 - bc.x - bc.y) * n0 + bc.x * n1 + bc.y * n2;
+
+    L = normalize(LP - P);
+    dist = distance(LP, P);
+
+    float LNdotL = dot(-L, LN);
+
+    if (LNdotL > 0.0)
+    {
+        float area = 0.5 * length(cross(v2 - v0, v1 - v0));
+        float denom = LNdotL * area;
+        pdf = denom > 0.0 ? (dist * dist) / denom : 0.0;
+        return light.intensity.xyz;
+    }
+    else
+    {
+        pdf = 0.0;
+        return vec3(0.0);
+    }
+}
+
+vec3 Light_Sample(RtLight light, vec3 s, vec3 P, vec3 N, out vec3 L, out float dist, out float pdf)
+{
+    vec3 I = vec3(0.0);
+    switch (light.type)
+    {
+    case RTE_LIGHT_POINT:
+    {
+        L = normalize(light.position - P);
+        dist = distance(light.position, P);
+        I = light.intensity.xyz / (dist * dist);
+        pdf = 1.0;
+        break;
+    }
+
+    case RTE_LIGHT_SPOT:
+    {
+        L = normalize(light.position - P);
+        dist = distance(light.position, P);
+        float LdotS = max(0.0, dot(-L, normalize(light.direction.xyz)));
+        float spotEffect = smoothstep(light.spotAngles.x, light.spotAngles.y, LdotS);
+        I = spotEffect * light.intensity.xyz / (dist * dist);
+        pdf = 1.0;
+        break;
+    }
+
+    case RTE_LIGHT_DIRECTIONAL:
+    {
+        L = normalize(light.direction.xyz);
+        dist = 1000000000.f;
+        I = light.intensity.xyz;
+        pdf = 1.0;
+        break;
+    }
+
+    case RTE_LIGHT_AREA:
+    {
+        I = AreaLight_Sample(light, s, P, N, L, dist, pdf);
+        break;
+    }
+
+    }
+    return I;
+}
+
+float FresnelSchlickIor(float ior, vec3 N, vec3 V)
+{
+    float R = (1.0 - ior) / (1.0 + ior);
+    R *= R;
+    const float NdotV = clamp(dot(V, N), 0.0, 1.0);
+    return (R + (1.0f - R) * pow(1.0 - NdotV, 5.0));
+}
+
+shared uint ldsRayCount;
+
+void main()
+{
+    ivec2 bufferSize = textureSize(gBuffer0, 0);
+
+    uint globalIndex = gl_GlobalInvocationID.y * bufferSize.x +
+        gl_GlobalInvocationID.x;
+    uint localIndex = gl_LocalInvocationID.y * TILE_SIZE +
+        gl_LocalInvocationID.x;
+
+    vec3 V = -rays[globalIndex].direction;
+    uint pixelIdx = rays[globalIndex].pixelIdx;
+    ivec2 st = ivec2(pixelIdx % bufferSize.x, pixelIdx / bufferSize.x);
+    uint shapeID = hits[globalIndex].shape_id;
+
+    Ray shadowRay = { vec3(0.0), pixelIdx, vec3(0.0), 0.0};
+
+    if (shapeID == INVALID_ADDR || rays[globalIndex].max_t == 0.0 || globalIndex >= rayCount)
+    {
+        outLightSamples[globalIndex] = vec4(0.0);
+        outShadowRays[globalIndex] = shadowRay;
+        return;
+    }
+
+    uint primID = hits[globalIndex].prim_id;
+
+    Shape shape = shapes[shapeID];
+
+    vec2 bc = hits[globalIndex].uv;
+
+    uint idx0 = indices[shape.indexOffset + 3 * primID];
+    uint idx1 = indices[shape.indexOffset + 3 * primID + 1];
+    uint idx2 = indices[shape.indexOffset + 3 * primID + 2];
+
+    Vertex vertexData[3] = { vertices[idx0], vertices[idx1], vertices[idx2] };
+
+    vec3 v0 = vertexData[0].posUVx.xyz;
+    vec3 v1 = vertexData[1].posUVx.xyz;
+    vec3 v2 = vertexData[2].posUVx.xyz;
+
+    vec3 n0 = vertexData[0].normalUVy.xyz;
+    vec3 n1 = vertexData[1].normalUVy.xyz;
+    vec3 n2 = vertexData[2].normalUVy.xyz;
+
+    vec2 uv0 = vec2(vertexData[0].posUVx.a, vertexData[0].normalUVy.a);
+    vec2 uv1 = vec2(vertexData[1].posUVx.a, vertexData[2].normalUVy.a);
+    vec2 uv2 = vec2(vertexData[2].posUVx.a, vertexData[2].normalUVy.a);
+
+    vec3 P = (1.0 - bc.x - bc.y) * v0 + bc.x * v1 + bc.y * v2;
+    vec3 N = (1.0 - bc.x - bc.y) * n0 + bc.x * n1 + bc.y * n2;
+    vec2 tex = (1.0 - bc.x - bc.y) * uv0 + bc.x * uv1 + bc.y * uv2;
+
+    if (dot(N, V) < 0.0)
+    {
+        N = -N;
+    }
+
+    Material material = materials[shape.materialIndex];
+
+    BRDFInputs inputs;
+    inputs.albedo = Texture_Sample2D(material.diffuseMap, tex).xyz;
+    inputs.roughness = 1.0;
+    inputs.metallic = 0.0;
+    float transparency = 0.0;//inputs.albedo.x;
+
+    uint frameCount = uint(ubo.viewPos.w);
+    uint cmjSequenceIndex = (frameCount + rng[pixelIdx % (256 * 256)]) % CMJ_CELL_SAMPLE_COUNT;
+    uint cmjPatternIndex = (pixelIdx + 1) * (frameCount / CMJ_CELL_SAMPLE_COUNT + 1);
+
+    vec2 cmjSample = SampleCMJ(cmjSequenceIndex, CMJ_CELL_SIZE, cmjPatternIndex);
+    vec2 cmjSample0 = SampleCMJ(cmjSequenceIndex, CMJ_CELL_SIZE, cmjPatternIndex + frameCount);
+    vec2 cmjSample1 = SampleCMJ(cmjSequenceIndex, CMJ_CELL_SIZE, cmjPatternIndex + 2 * frameCount);
+    vec2 cmjSample2 = SampleCMJ(cmjSequenceIndex, CMJ_CELL_SIZE, cmjPatternIndex + 3 * frameCount);
+
+    uint lightIdx = clamp(uint(cmjSample0.x * pushConsts.numLights), 0u, pushConsts.numLights - 1u);
+
+    vec3 L;
+    float pdf;
+    float dist;
+    vec3 I = Light_Sample(rt_lights[lightIdx], vec3(cmjSample, cmjSample0.y), P, N, L, dist, pdf);
+
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    vec3 BRDF = BRDF_Evaluate(inputs, V, N, L);
+
+    vec4 radiance = vec4(0.0);
+    
+
+    if (length(I) > 0.0 && length(BRDF) > 0.0 && pdf > 0.0 && NdotL > 0.0)
+    {
+        radiance.xyz = throughput[pixelIdx].xyz * BRDF * NdotL * I / pdf;
+
+        // Init shadow ray
+        shadowRay.origin = P + RT_EPSILON * N;
+        shadowRay.direction = normalize(L);
+        shadowRay.max_t = dist;
+        shadowRay.pixelIdx = pixelIdx;
+    }
+
+    outLightSamples[globalIndex] = radiance;
+    outShadowRays[globalIndex] = shadowRay;
+
+
+    //uvec2 samplesNum = imageLoad(sampleCounters, st).xy;
+    //samplesNum.y += 1;
+
+    //imageStore(resultImage, st, radiance);
+    //imageStore(sampleCounters, st, uvec4(samplesNum, 0, 0));
+
+    // Generate extension rays
+
+    if (localIndex == 0)
+        ldsRayCount = 0;
+
+    barrier();
+
+    if (cmjSample2.y > transparency)
+    {
+        BRDF = BRDF_Sample(inputs, vec3(cmjSample1, cmjSample2.x), V, N, L, pdf);
+        P += N * RT_EPSILON;
+        NdotL = clamp(dot(N, L), 0.0, 1.0);
+    } 
+    else
+    {
+        BRDF = vec3(1.0);
+        P -= N * RT_EPSILON;
+        pdf = 1.0;
+        NdotL = 1.0;
+        L = -V;
+    }
+
+    bool emitRay = length(BRDF) > 0.0 && pdf > 0.0;
+    uint myLocalIndex = 0;
+
+    barrier();
+
+    Ray myRay = { vec3(length(BRDF), 0.0, pdf), pixelIdx, vec3(0.0), 0.0};
+    if (emitRay)
+    {
+
+        throughput[pixelIdx] *= vec4(BRDF * NdotL / pdf, 1.0);
+        myLocalIndex = atomicAdd(ldsRayCount, 1);
+
+        myRay.origin = P;
+        myRay.direction = normalize(L);
+        myRay.max_t = RAY_LENGTH;
+        myRay.pixelIdx = pixelIdx;
+    }
+
+    barrier();
+
+    if (localIndex == 0)
+    {
+        uint baseGroupIndex = atomicAdd(rayCountOut, ldsRayCount);
+        ldsRayCount = baseGroupIndex;
+    }
+
+    barrier();
+
+    if (emitRay)
+    {
+        raysOut[ldsRayCount + myLocalIndex] = myRay;
+    }
+}

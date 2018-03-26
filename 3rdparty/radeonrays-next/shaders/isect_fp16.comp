@@ -42,11 +42,15 @@ layout(set = 0, binding = 1) buffer Hits {
   Hit hits[];
 };
 
-layout(set = 0, binding = 2) buffer BVH {
+layout(set = 0, binding = 2) buffer RayCount {
+    uint ray_count[];
+};
+
+layout(set = 1, binding = 3) buffer BVH {
   BVHNode bvh[];
 };
 
-layout(set = 0, binding = 3) buffer Stack {
+layout(set = 1, binding = 4) buffer Stack {
   uint stack[];
 };
 
@@ -187,7 +191,7 @@ void main() {
     uint index = gl_GlobalInvocationID.x;
     uint local_index = gl_LocalInvocationID.x;
 
-    if (index >= N) return;
+    if (index >= ray_count[0]) return;
 
     Ray myRay = rays[index];
     f16vec3 invDir = safe_invdir(myRay.direction);

@@ -6,6 +6,7 @@ project "BaikalStandalone"
 
     includedirs{ "../RadeonRays/RadeonRays/include", 
                 "../RadeonRays/CLW", "../Baikal", 
+                "../Baikal/Vulkan",
                 "../3rdparty",
                 "../3rdparty/radeonrays-next/radeonrays/inc",
                 "../3rdparty/glm",
@@ -35,6 +36,7 @@ project "BaikalStandalone"
                     }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
+                "_USE_MATH_DEFINES",
                 "NOMINMAX"}
 
         configuration {"Debug"}

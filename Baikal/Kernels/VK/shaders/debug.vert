@@ -3,8 +3,8 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout (location = 0) in vec3 inPos;
-layout (location = 1) in vec2 inUV;
+layout (location = 0) in vec4 inPosUvx;
+layout (location = 1) in vec4 inNormalUVy;
 
 layout (binding = 0) uniform UBO 
 {
@@ -22,9 +22,9 @@ out gl_PerVertex
 
 void main() 
 {
-    outUV = inUV;
+    outUV = vec2(inPosUvx.a, inNormalUVy.a);
 
-    vec4 tmpPos = vec4(inPos, 1.0);
+    vec4 tmpPos = vec4(inPosUvx.xyz, 1.0);
     tmpPos.x += gl_InstanceIndex;
     tmpPos.xy *= vec2(1.0/4.0, 1.0/3.0);
     

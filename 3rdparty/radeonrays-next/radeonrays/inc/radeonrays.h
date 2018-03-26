@@ -131,16 +131,16 @@ extern "C" {
     // Delete shape object.
     RR_API rr_status rrDeleteShape(rr_instance instance, rr_shape shape);
 
-    // Bind buffers for the query
-    RR_API rr_status rrBindBuffers(
+    // Set perfomance counters for ray tracing command buffer
+    RR_API rr_status rrSetTraceRaysPerformanceInfo(
         // API instance
         rr_instance instance,
-        // Buffer containing rays
-        VkBuffer ray_buffer,
-        // Buffer to write hits to
-        VkBuffer hit_buffer,
-        // Number of rays/hits in the buffer
-        uint32_t num_rays
+        // Query pool
+        VkQueryPool query_pool,
+        // Query index before dispatch
+        uint32_t begin_query_idx,
+        // Query index after dispatch
+        uint32_t end_query_idx
     );
 
     // Create ray tracing command buffer
@@ -150,9 +150,18 @@ extern "C" {
         // Intersect or occluded
         rr_query_type query_type,
         // Number or rays to trace
-        uint32_t num_rays,
+        uint32_t max_rays,
         // Resulting command buffer
         VkCommandBuffer* out_command_buffer
+    );
+
+    RR_API rr_status rrBindBuffers(
+        // API instance
+        rr_instance instance,
+        // 
+        VkDescriptorBufferInfo rays,
+        VkDescriptorBufferInfo hits,
+        VkDescriptorBufferInfo ray_count
     );
 
     // Create triangle mesh

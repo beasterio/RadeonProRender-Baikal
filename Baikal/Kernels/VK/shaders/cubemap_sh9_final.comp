@@ -1,0 +1,52 @@
+#version 450
+#define PI 3.14159265358979323846
+#define TILE_SIZE 1
+
+struct SH9Color
+{
+    vec4 coefficients[9];
+};
+
+layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+layout (binding = 0) buffer Sh9ColorSrc
+{
+    SH9Color srcShColor[];
+};
+
+layout (binding = 1) buffer Sh9ColorDst
+{
+    SH9Color dstShColor[];
+};
+
+layout(push_constant) uniform PushConsts
+{
+    int probe_idx;
+    int dummy0;
+    int dummy1;
+    int dummy2;
+} push_consts;
+
+void main() 
+{
+    int probe_idx = push_consts.probe_idx;
+
+    SH9Color src_sh[6] = { srcShColor[0], srcShColor[1], srcShColor[2], srcShColor[3], srcShColor[4], srcShColor[5] };
+    
+    for (int j = 0; j < 9; j++)
+        dstShColor[probe_idx].coefficients[j] = vec4(0.f);
+
+    for (int i = 0; i < 6; i++)
+    {
+        for (int j = 0; j < 9; j++)
+        {
+            dstShColor[probe_idx].coefficients[j] += src_sh[i].coefficients[j];
+        }
+    }
+
+    float weight_sum = dstShColor[probe_idx].coefficients[0].w;
+
+    for (int j = 0; j < 9; j++)
+    {
+        dstShColor[probe_idx].coefficients[j].xyz *= (4.0f * PI) / weight_sum;
+    }
+}

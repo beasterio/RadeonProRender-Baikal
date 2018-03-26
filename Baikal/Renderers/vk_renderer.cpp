@@ -21,7 +21,8 @@
  ********************************************************************/
 #include "vk_renderer.h"
 #include "SceneGraph/vkscene.h"
-#include "Vulkan/gpu_profiler.h"
+#include "Vulkan/profiler/gpu_profiler.h"
+#include "Vulkan/rteffects.h"
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -29,8 +30,19 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+//#define STB_IMAGE_WRITE_IMPLEMENTATION
+//#include "stb_image_write.h"
+
+#define ENABLE_VALIDATION true
+#define ENABLE_PROFILER false
+
+#define MAX_DEBUG_IMAGES 3
+
 namespace
 {
+    bool aoEnabled = true;
+    bool giEnabled = true;
+
     const std::string GetAssetPath()
     {
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -110,14 +122,15 @@ namespace Baikal
             PreparePipelines(&scene);
         }
 
+        BuildCommandBuffers();
         if (shapes_changed || scene_changed || m_output_changed || textures_changed)
         {
-            BuildDrawCommandBuffers();
+            //BuildDrawCommandBuffers();
         }
 
         if (shapes_changed || m_output_changed || textures_changed)
         {
-            BuildDeferredCommandBuffer(&scene);
+            //BuildDeferredCommandBuffer(&scene);
         }
         if (uniform_buffers_changed)
         {
@@ -126,42 +139,8 @@ namespace Baikal
 
         scene.dirty_flags = VkScene::NONE;
         m_output_changed = false;
-        //if (scene.dirty_flags != VkScene::NONE)
-        if (false)
-        {
-            if (scene.dirty_flags & VkScene::SHAPES)
-            {
 
-            }
-            if (scene.dirty_flags & VkScene::CURRENT_SCENE ||
-                scene.dirty_flags & VkScene::SCENE_ATTRIBUTES)
-            {
-                BuildDrawCommandBuffers();
-            }
-            if (scene.dirty_flags & VkScene::CAMERA ||
-                scene.dirty_flags & VkScene::LIGHTS)
-            {
-            }
-            if (scene.dirty_flags & VkScene::SHAPE_PROPERTIES)
-            {
-            }
-            if (scene.dirty_flags & VkScene::MATERIALS)
-            {
-            }
-            if (scene.dirty_flags & VkScene::TEXTURES)
-            {
-            }
-
-            if (scene.dirty_flags & VkScene::VOLUMES)
-            {
-            }
-
-
-
-        }
-
-
-        Draw();
+        Draw(scene);
         m_view_updated = false;
 
         ++m_frame_counter;
@@ -187,7 +166,7 @@ namespace Baikal
 
         m_output_changed = true;
     }
-    void VkRenderer::Draw()
+    void VkRenderer::Draw(VkScene const& scene)
     {
         auto& device = m_vulkan_device->logicalDevice;
         
@@ -198,654 +177,580 @@ namespace Baikal
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &compute_queue);
 
         VkSubmitInfo submit_info = vks::initializers::submitInfo();
-        // Gbuffer rendering
-        submit_info.pWaitSemaphores = VK_NULL_HANDLE;
-        submit_info.waitSemaphoreCount = 0;
-        VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        submit_info.pWaitDstStageMask = &stageFlags;
-        submit_info.pSignalSemaphores = &m_offscreen_semaphore;
-        submit_info.signalSemaphoreCount = 1;
-        //submit_info.signalSemaphoreCount = 0;
-        submit_info.pCommandBuffers = &m_command_buffers.deferred;
-        submit_info.commandBufferCount = 1;
-        VK_CHECK_RESULT(vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE));
-
-        // Shadow map pass
-        submit_info.pWaitSemaphores = nullptr;
-        submit_info.waitSemaphoreCount = 0;
-        submit_info.pSignalSemaphores = &m_shadow_semaphore;
-        submit_info.signalSemaphoreCount = 1;
-        submit_info.commandBufferCount = LIGHT_COUNT;
-        submit_info.pCommandBuffers = &m_command_buffers.shadow[0];
-        VK_CHECK_RESULT(vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE));
-
-        // GI Ray generation
-        submit_info.pWaitSemaphores = &m_offscreen_semaphore;
-        submit_info.waitSemaphoreCount = 1;
-        stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        submit_info.pWaitDstStageMask = &stageFlags;
-        submit_info.pSignalSemaphores = &m_gi_complete;
-        submit_info.signalSemaphoreCount = 1;
-        submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &m_command_buffers.gi;
-        VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE));
-
-
-#ifdef _DEBUG
-        //#define CHECK_RAYS
-#ifdef CHECK_RAYS
-        // Data transfer
-        submit_info.pWaitSemaphores = nullptr;
-        submit_info.waitSemaphoreCount = 0;
-        submit_info.pSignalSemaphores = nullptr;
-        submit_info.signalSemaphoreCount = 0;
-        submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers = &m_command_buffers.dbg_transferRaysToHost;
-        VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &submit_info, VK_NULL_HANDLE));
-        vkDeviceWaitIdle(device);
-
-
-        // DEBUG code
-        vkDeviceWaitIdle(device);
+#if ENABLE_PROFILER        
         {
-            void* data = nullptr;
-            VK_CHECK_RESULT(vkMapMemory(device, m_buffers.raysStaging.memory, 0, VK_WHOLE_SIZE, 0, &data));
-            std::vector<Ray> rays(width * height);
-            memcpy(rays.data(), data, width * height * sizeof(Ray));
+            m_profiler_view.Render(m_profiler);
+            buildCommandBuffers();
 
-            for (auto& r : rays)
+            DeferredRenderPass::BuildCommandBufferInfo deferred_pass_build_info = {
+                *m_gbuffer_pass
+                , renderPass
+                , VulkanExampleBase::frameBuffers[currentBuffer]
+                , drawCmdBuffers[currentBuffer]
+                , aoEnabled
+                , giEnabled
+                , debugViewEnabled
+            };
+
+            m_deferred_pass->BuildCommandBuffer(deferred_pass_build_info);
+        }
+#endif
+
+        m_gbuffer_pass->Execute(graphics_queue);
+        m_shadow_pass->Execute(graphics_queue);
+
+        VkPipelineStageFlags stageFlags;
+
+        VkSubmitInfo submitInfo = vks::initializers::submitInfo();
+
+        if (m_view_updated)
+        {
+            // Clear
             {
-                assert(!std::isnan(r.direction[0]));
-                assert(!std::isnan(r.direction[1]));
-                assert(!std::isnan(r.direction[2]));
-
-                assert(!std::isnan(r.origin[0]));
-                assert(!std::isnan(r.origin[1]));
-                assert(!std::isnan(r.origin[2]));
+                submitInfo.pWaitSemaphores = nullptr;
+                submitInfo.waitSemaphoreCount = 0;
+                stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                submitInfo.pWaitDstStageMask = &stageFlags;
+                submitInfo.pSignalSemaphores = nullptr;
+                submitInfo.signalSemaphoreCount = 0;
+                submitInfo.commandBufferCount = 1;
+                submitInfo.pCommandBuffers = &m_command_buffers.rtClear;
+                VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submitInfo, VK_NULL_HANDLE));
             }
-
-            vkUnmapMemory(device, m_buffers.raysStaging.memory);
-        }
-#endif
-#endif
-        vkDeviceWaitIdle(device);
-
-        // Trace BVH
-        {
-            submit_info.pCommandBuffers = &m_command_buffers.traceRays;
-            submit_info.commandBufferCount = 1;
-            submit_info.pWaitSemaphores = &m_gi_complete;
-            submit_info.waitSemaphoreCount = 1;
-            VkSemaphore signalSemaphores[] = { m_gi_trace_complete[0] };
-            submit_info.pSignalSemaphores = signalSemaphores;
-            submit_info.signalSemaphoreCount = 1;
-            VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE);
         }
 
-        // Resolve gi rays
+        if (giEnabled)
         {
-            submit_info.pWaitSemaphores = &m_gi_trace_complete[0];
-            submit_info.waitSemaphoreCount = 1;
-            VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            submit_info.pSignalSemaphores = &m_gi_resolve_complete;
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.pCommandBuffers = m_view_updated ? &m_command_buffers.giResolveAndClear : &m_command_buffers.giResolve;
-            submit_info.commandBufferCount = 1;
-            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE));
-        }
-
-        // Filter GI rays
-        {
-            submit_info.pWaitSemaphores = &m_gi_resolve_complete;
-            submit_info.waitSemaphoreCount = 1;
-            VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            submit_info.pSignalSemaphores = &m_bilateral_filter_complete;
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.pCommandBuffers = &m_command_buffers.bilateralFilter;
-            submit_info.commandBufferCount = 1;
-            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE));
-        }
-
-        // AO Ray generation
-        {
-            submit_info.pWaitSemaphores = &m_offscreen_semaphore;
-            submit_info.waitSemaphoreCount = 0;
+            // GI Ray generation
+            VkSemaphore semaphore = m_gbuffer_pass->GetSyncPrimitive();
+            submitInfo.pWaitSemaphores = &semaphore;
+            submitInfo.waitSemaphoreCount = 1;
             stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            submit_info.pSignalSemaphores = &m_ao_complete;
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.commandBufferCount = 1;
-            submit_info.pCommandBuffers = &m_command_buffers.ao;
-            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE));
+            submitInfo.pWaitDstStageMask = &stageFlags;
+            submitInfo.pSignalSemaphores = &m_gi_complete;
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.commandBufferCount = 9;
+            submitInfo.pCommandBuffers = &m_command_buffers.gi[0];
+            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submitInfo, VK_NULL_HANDLE));
         }
 
-        vkDeviceWaitIdle(device);
-
-        // Trace BVH
+        if (aoEnabled)
         {
-            submit_info.pCommandBuffers = &m_command_buffers.traceRays;
-            submit_info.commandBufferCount = 1;
-            VkSemaphore waitSemaphores[] = { m_ao_complete };
-            submit_info.pWaitSemaphores = waitSemaphores;
-            submit_info.waitSemaphoreCount = 1;
-            submit_info.pSignalSemaphores = &m_ao_trace_complete;
-            submit_info.signalSemaphoreCount = 1;
-            VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE);
+            // AO Ray generation
+            {
+                VkSemaphore semaphore = m_gbuffer_pass->GetSyncPrimitive();
+
+                submitInfo.pWaitSemaphores = &semaphore;
+                submitInfo.waitSemaphoreCount = giEnabled ? 0 : 1;
+                stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+                submitInfo.pWaitDstStageMask = &stageFlags;
+                submitInfo.pSignalSemaphores = &m_ao_complete;
+                submitInfo.signalSemaphoreCount = 1;
+                submitInfo.commandBufferCount = 3;
+                submitInfo.pCommandBuffers = &m_command_buffers.ao[0];
+                VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submitInfo, VK_NULL_HANDLE));
+            }
         }
 
-        // Resolve ao rays
+        // Filter rays
+        if (aoEnabled || giEnabled)
         {
-            submit_info.pWaitSemaphores = &m_ao_trace_complete;
-            submit_info.waitSemaphoreCount = 1;
-            VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            submit_info.pSignalSemaphores = &m_ao_resolve_complete;
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.pCommandBuffers = m_view_updated ? &m_command_buffers.aoResolveAndClear : &m_command_buffers.aoResolve;
-            submit_info.commandBufferCount = 1;
-            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE));
-        }
+            static std::vector<VkSemaphore> waitSemaphores;
 
-        // Filter AO rays
-        {
-            submit_info.pWaitSemaphores = &m_ao_resolve_complete;
-            submit_info.waitSemaphoreCount = 1;
-            VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-            submit_info.pWaitDstStageMask = &stageFlags;
-            submit_info.pSignalSemaphores = &m_bilateral_filter_ao_complete;
-            submit_info.signalSemaphoreCount = 1;
-            submit_info.pCommandBuffers = &m_command_buffers.bilateralFilterAO;
-            submit_info.commandBufferCount = 1;
-            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submit_info, VK_NULL_HANDLE));
-        }
+            waitSemaphores.clear();
+            if (aoEnabled) waitSemaphores.push_back(m_ao_complete);
+            if (giEnabled) waitSemaphores.push_back(m_gi_complete);
 
-        {
-            VkSemaphore waitSemaphores[] = { m_shadow_semaphore, m_bilateral_filter_complete, m_bilateral_filter_ao_complete };
-            //VkSemaphore waitSemaphores[] = { m_shadow_semaphore, m_offscreen_semaphore};
-            // Scene rendering
-            submit_info.pWaitSemaphores = waitSemaphores;
-            submit_info.waitSemaphoreCount = sizeof(waitSemaphores) / sizeof(VkSemaphore);
-            //submit_info.pWaitSemaphores = waitSemaphores;
-            //submit_info.waitSemaphoreCount = 2;
-            
-            
+            submitInfo.pWaitSemaphores = &waitSemaphores[0];
+            submitInfo.waitSemaphoreCount = waitSemaphores.size();
+
             VkPipelineStageFlags stageFlags[] = {
-                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
             };
 
-            submit_info.pWaitDstStageMask = stageFlags;
-            submit_info.pSignalSemaphores = VK_NULL_HANDLE;
-            submit_info.signalSemaphoreCount = 0;
-            submit_info.pCommandBuffers = &m_command_buffers.drawCmdBuffers;
-            submit_info.commandBufferCount = 1;
-            VK_CHECK_RESULT(vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE));
+            submitInfo.pWaitDstStageMask = &stageFlags[0];
+            submitInfo.pSignalSemaphores = &m_bilateral_filter_complete;
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pCommandBuffers = &m_command_buffers.bilateralFilter;
+            submitInfo.commandBufferCount = 1;
+            VK_CHECK_RESULT(vkQueueSubmit(compute_queue, 1, &submitInfo, VK_NULL_HANDLE));
         }
+
+        {
+            std::vector<VkSemaphore> waitSemaphores = { m_shadow_pass->GetSyncPrimitive() };
+            std::vector<VkPipelineStageFlags> stageFlags = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT };
+
+            if (aoEnabled || giEnabled) waitSemaphores.push_back(m_bilateral_filter_complete);
+
+            m_deferred_pass->SetDependencies(waitSemaphores, stageFlags);
+            m_deferred_pass->Execute(graphics_queue, m_command_buffers.drawCmdBuffers);
+        }
+
+        BuffersList& buffers_list = scene.resources->GetBuffersList();
+        vks::Buffer sh9_buffer = buffers_list.Get(g_irradiance_grid_buffer_name);
+
+        //std::vector<VkSemaphore> semaphores;
+        //_cubemap_render->RenderSceneToCubemap(*scene, camera.position, _cubemap, semaphores);
+        //_cubemap_prefilter->GenerateIrradianceSH9Coefficients(_cubemap, sh9_buffer, 0, semaphores);
 
         VK_CHECK_RESULT(vkQueueWaitIdle(graphics_queue));
     }
 
-    void VkRenderer::BuildDeferredCommandBuffer(VkScene const* scene)
-    {
-        auto& device = m_vulkan_device->logicalDevice;
-        auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
-        auto const& framebuffers = vk_output->framebuffers;
-        int width = vk_output->width();
-        int height = vk_output->height();
-        VkQueue graphics_queue;
-        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
-        VkQueue compute_queue;
-        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &compute_queue);
-
-        uint32_t query_id = 0;
-
-        const uint32_t startGenerateAOQuery = query_id++;
-        const uint32_t endGenerateAOQuery = query_id++;
-        const uint32_t startGenerateGIRays = query_id++;
-        const uint32_t endGenerateGIRays = query_id++;
-        const uint32_t startAOResolve = query_id++;
-        const uint32_t endAOResolve = query_id++;
-        const uint32_t startGIResolve = query_id++;
-        const uint32_t endGIResolve = query_id++;
-        const uint32_t startAOBilateralFilter = query_id++;
-        const uint32_t endAOBilateralFilter = query_id++;
-        const uint32_t startGIBilateralFilter = query_id++;
-        const uint32_t endGIBilateralFilter = query_id++;
-
-        if (m_command_buffers.deferred == VK_NULL_HANDLE)
-        {
-            m_command_buffers.deferred = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
-        }
-
-        // Create a semaphore used to synchronize offscreen rendering and usage
-        VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
-        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_offscreen_semaphore));
-
-        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-        VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-        std::array<VkClearValue, 4> clearValues = {};
-        VkViewport viewport;
-        VkRect2D scissor;
-
-        // Deferred calculations
-        // -------------------------------------------------------------------------------------------------------
-
-        vkBeginCommandBuffer(m_command_buffers.deferred, &cmdBufInfo);
-
-        // Clear values for all attachments written in the fragment sahder
-        clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        clearValues[1].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        clearValues[2].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        clearValues[3].depthStencil = { 1.0f, 0 };
-
-        renderPassBeginInfo.renderPass = framebuffers.deferred->renderPass;
-        renderPassBeginInfo.framebuffer = framebuffers.deferred->framebuffer;
-        renderPassBeginInfo.renderArea.extent.width = framebuffers.deferred->width;
-        renderPassBeginInfo.renderArea.extent.height = framebuffers.deferred->height;
-        renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-        renderPassBeginInfo.pClearValues = clearValues.data();
-
-        vkCmdBeginRenderPass(m_command_buffers.deferred, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        viewport = vks::initializers::viewport((float)framebuffers.deferred->width, (float)framebuffers.deferred->height, 0.0f, 1.0f);
-        vkCmdSetViewport(m_command_buffers.deferred, 0, 1, &viewport);
-
-        scissor = vks::initializers::rect2D(framebuffers.deferred->width, framebuffers.deferred->height, 0, 0);
-        vkCmdSetScissor(m_command_buffers.deferred, 0, 1, &scissor);
-
-        vkCmdBindPipeline(m_command_buffers.deferred, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.offscreen);
-        RenderScene(scene, m_command_buffers.deferred, false);
-        vkCmdEndRenderPass(m_command_buffers.deferred);
-
-        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.deferred));
-
-        // Build shadow pass command buffers
-        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_shadow_semaphore));
-
-        for (int i = 0; i < LIGHT_COUNT; i++)
-        {
-            m_command_buffers.shadow[i] = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
-
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-            VkClearValue clearValues[1];
-            clearValues[0].depthStencil = { 1.0f, 0 };
-
-            VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-            renderPassBeginInfo.renderPass = framebuffers.shadow[i]->renderPass;
-            renderPassBeginInfo.framebuffer = framebuffers.shadow[i]->framebuffer;
-            renderPassBeginInfo.renderArea.offset.x = 0;
-            renderPassBeginInfo.renderArea.offset.y = 0;
-            renderPassBeginInfo.renderArea.extent.width = framebuffers.shadow[i]->width;
-            renderPassBeginInfo.renderArea.extent.height = framebuffers.shadow[i]->height;
-            renderPassBeginInfo.clearValueCount = 2;
-            renderPassBeginInfo.pClearValues = clearValues;
-
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.shadow[i], &cmdBufInfo));
-
-            VkViewport viewport = vks::initializers::viewport((float)framebuffers.shadow[i]->width, (float)framebuffers.shadow[i]->height, 0.0f, 1.0f);
-            vkCmdSetViewport(m_command_buffers.shadow[i], 0, 1, &viewport);
+    //void VkRenderer::BuildDeferredCommandBuffer(VkScene const* scene)
+    //{
+    //    auto& device = m_vulkan_device->logicalDevice;
+    //    auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
+    //    auto const& framebuffers = vk_output->framebuffers;
+    //    int width = vk_output->width();
+    //    int height = vk_output->height();
+    //    VkQueue graphics_queue;
+    //    vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
+    //    VkQueue compute_queue;
+    //    vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &compute_queue);
+
+    //    uint32_t query_id = 0;
+
+    //    const uint32_t startGenerateAOQuery = query_id++;
+    //    const uint32_t endGenerateAOQuery = query_id++;
+    //    const uint32_t startGenerateGIRays = query_id++;
+    //    const uint32_t endGenerateGIRays = query_id++;
+    //    const uint32_t startAOResolve = query_id++;
+    //    const uint32_t endAOResolve = query_id++;
+    //    const uint32_t startGIResolve = query_id++;
+    //    const uint32_t endGIResolve = query_id++;
+    //    const uint32_t startAOBilateralFilter = query_id++;
+    //    const uint32_t endAOBilateralFilter = query_id++;
+    //    const uint32_t startGIBilateralFilter = query_id++;
+    //    const uint32_t endGIBilateralFilter = query_id++;
+
+    //    if (m_command_buffers.deferred == VK_NULL_HANDLE)
+    //    {
+    //        m_command_buffers.deferred = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+    //    }
+
+    //    // Create a semaphore used to synchronize offscreen rendering and usage
+    //    VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
+    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_offscreen_semaphore));
+
+    //    VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+
+    //    VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
+    //    std::array<VkClearValue, 4> clearValues = {};
+    //    VkViewport viewport;
+    //    VkRect2D scissor;
+
+    //    // Deferred calculations
+    //    // -------------------------------------------------------------------------------------------------------
+
+    //    vkBeginCommandBuffer(m_command_buffers.deferred, &cmdBufInfo);
+
+    //    // Clear values for all attachments written in the fragment sahder
+    //    clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+    //    clearValues[1].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+    //    clearValues[2].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+    //    clearValues[3].depthStencil = { 1.0f, 0 };
+
+    //    renderPassBeginInfo.renderPass = framebuffers.deferred->renderPass;
+    //    renderPassBeginInfo.framebuffer = framebuffers.deferred->framebuffer;
+    //    renderPassBeginInfo.renderArea.extent.width = framebuffers.deferred->width;
+    //    renderPassBeginInfo.renderArea.extent.height = framebuffers.deferred->height;
+    //    renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    //    renderPassBeginInfo.pClearValues = clearValues.data();
+
+    //    vkCmdBeginRenderPass(m_command_buffers.deferred, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    //    viewport = vks::initializers::viewport((float)framebuffers.deferred->width, (float)framebuffers.deferred->height, 0.0f, 1.0f);
+    //    vkCmdSetViewport(m_command_buffers.deferred, 0, 1, &viewport);
+
+    //    scissor = vks::initializers::rect2D(framebuffers.deferred->width, framebuffers.deferred->height, 0, 0);
+    //    vkCmdSetScissor(m_command_buffers.deferred, 0, 1, &scissor);
+
+    //    vkCmdBindPipeline(m_command_buffers.deferred, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.offscreen);
+    //    RenderScene(scene, m_command_buffers.deferred, false);
+    //    vkCmdEndRenderPass(m_command_buffers.deferred);
+
+    //    VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.deferred));
+
+    //    // Build shadow pass command buffers
+    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_shadow_semaphore));
+
+    //    for (int i = 0; i < LIGHT_COUNT; i++)
+    //    {
+    //        m_command_buffers.shadow[i] = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+
+    //        VkClearValue clearValues[1];
+    //        clearValues[0].depthStencil = { 1.0f, 0 };
+
+    //        VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
+    //        renderPassBeginInfo.renderPass = framebuffers.shadow[i]->renderPass;
+    //        renderPassBeginInfo.framebuffer = framebuffers.shadow[i]->framebuffer;
+    //        renderPassBeginInfo.renderArea.offset.x = 0;
+    //        renderPassBeginInfo.renderArea.offset.y = 0;
+    //        renderPassBeginInfo.renderArea.extent.width = framebuffers.shadow[i]->width;
+    //        renderPassBeginInfo.renderArea.extent.height = framebuffers.shadow[i]->height;
+    //        renderPassBeginInfo.clearValueCount = 2;
+    //        renderPassBeginInfo.pClearValues = clearValues;
+
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.shadow[i], &cmdBufInfo));
+
+    //        VkViewport viewport = vks::initializers::viewport((float)framebuffers.shadow[i]->width, (float)framebuffers.shadow[i]->height, 0.0f, 1.0f);
+    //        vkCmdSetViewport(m_command_buffers.shadow[i], 0, 1, &viewport);
 
-            VkRect2D scissor = vks::initializers::rect2D(framebuffers.shadow[i]->width, framebuffers.shadow[i]->height, 0, 0);
-            vkCmdSetScissor(m_command_buffers.shadow[i], 0, 1, &scissor);
+    //        VkRect2D scissor = vks::initializers::rect2D(framebuffers.shadow[i]->width, framebuffers.shadow[i]->height, 0, 0);
+    //        vkCmdSetScissor(m_command_buffers.shadow[i], 0, 1, &scissor);
 
-            // Set depth bias (aka "Polygon offset")
-            // Required to avoid shadow mapping artefacts
-            vkCmdSetDepthBias(
-                m_command_buffers.shadow[i],
-                m_depth_bias_constant,
-                0.0f,
-                m_depth_bias_slope);
+    //        // Set depth bias (aka "Polygon offset")
+    //        // Required to avoid shadow mapping artefacts
+    //        vkCmdSetDepthBias(
+    //            m_command_buffers.shadow[i],
+    //            m_depth_bias_constant,
+    //            0.0f,
+    //            m_depth_bias_slope);
 
-            vkCmdBeginRenderPass(m_command_buffers.shadow[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    //        vkCmdBeginRenderPass(m_command_buffers.shadow[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            VkPipelineLayout pipelineLayout = m_pipeline_layouts.shadow;
-            vkCmdBindPipeline(m_command_buffers.shadow[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.shadow);
-            vkCmdBindDescriptorSets(m_command_buffers.shadow[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &m_descriptor_sets.shadow, 0, NULL);
+    //        VkPipelineLayout pipelineLayout = m_pipeline_layouts.shadow;
+    //        vkCmdBindPipeline(m_command_buffers.shadow[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.shadow);
+    //        vkCmdBindDescriptorSets(m_command_buffers.shadow[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &m_descriptor_sets.shadow, 0, NULL);
 
-            vkCmdPushConstants(m_command_buffers.shadow[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(int), &i);
+    //        vkCmdPushConstants(m_command_buffers.shadow[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(int), &i);
 
-            VkDeviceSize offsets[1] = { 0 };
+    //        VkDeviceSize offsets[1] = { 0 };
 
-            // Render from global buffer using index offsets
-            vkCmdBindVertexBuffers(m_command_buffers.shadow[i], VERTEX_BUFFER_BIND_ID, 1, &scene->vertex_buffer.buffer, offsets);
-            vkCmdBindIndexBuffer(m_command_buffers.shadow[i], scene->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    //        // Render from global buffer using index offsets
+    //        vkCmdBindVertexBuffers(m_command_buffers.shadow[i], VERTEX_BUFFER_BIND_ID, 1, &scene->vertex_buffer.buffer, offsets);
+    //        vkCmdBindIndexBuffer(m_command_buffers.shadow[i], scene->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            for (auto mesh : scene->meshes)
-            {
-                if (mesh.material->hasAlpha)
-                {
-                    continue;
-                }
-                //vkCmdBindDescriptorSets(shadowmapPass.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
-                //vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, 0, mesh.indexBase, 0);
-                vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, mesh.indexBase, 0, 0);
+    //        for (auto mesh : scene->meshes)
+    //        {
+    //            if (mesh.material->hasAlpha)
+    //            {
+    //                continue;
+    //            }
+    //            //vkCmdBindDescriptorSets(shadowmapPass.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
+    //            //vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, 0, mesh.indexBase, 0);
+    //            vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, mesh.indexBase, 0, 0);
 
-            }
+    //        }
 
-            vkCmdEndRenderPass(m_command_buffers.shadow[i]);
+    //        vkCmdEndRenderPass(m_command_buffers.shadow[i]);
 
-            VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.shadow[i]));
-        }
+    //        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.shadow[i]));
+    //    }
 
-        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_trace_complete));
-        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_trace_complete[0]));
-        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_trace_complete[1]));
+    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_trace_complete));
+    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_trace_complete[0]));
+    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_trace_complete[1]));
 
-        VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo();
-        vkCreateFence(device, &fenceCreateInfo, nullptr, &fences.transferToHost);
+    //    VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo();
+    //    vkCreateFence(device, &fenceCreateInfo, nullptr, &fences.transferToHost);
 
-        // Build transfer to host cmd buffer
-        {
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_transfer_complete));
+    //    // Build transfer to host cmd buffer
+    //    {
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_transfer_complete));
 
-            if (m_command_buffers.transferToHost == VK_NULL_HANDLE)
-            {
-                VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(m_vulkan_device->computeCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-                VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.transferToHost));
-            }
+    //        if (m_command_buffers.transferToHost == VK_NULL_HANDLE)
+    //        {
+    //            VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(m_vulkan_device->computeCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+    //            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.transferToHost));
+    //        }
 
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            vkBeginCommandBuffer(m_command_buffers.transferToHost, &cmdBufInfo);
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        vkBeginCommandBuffer(m_command_buffers.transferToHost, &cmdBufInfo);
 
-            VkBufferMemoryBarrier memBarries = vks::initializers::bufferMemoryBarrier();
-            memBarries.buffer = m_buffers.hitsLocal.buffer;
-            memBarries.offset = 0;
-            memBarries.size = m_buffers.hitsLocal.size;
-            memBarries.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            memBarries.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    //        VkBufferMemoryBarrier memBarries = vks::initializers::bufferMemoryBarrier();
+    //        memBarries.buffer = m_buffers.hitsLocal.buffer;
+    //        memBarries.offset = 0;
+    //        memBarries.size = m_buffers.hitsLocal.size;
+    //        memBarries.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    //        memBarries.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-            vkCmdPipelineBarrier(m_command_buffers.transferToHost, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &memBarries, 0, nullptr);
+    //        vkCmdPipelineBarrier(m_command_buffers.transferToHost, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &memBarries, 0, nullptr);
 
-            const uint32_t numRays = width * height;
-            const uint32_t hitBufferSize = numRays * sizeof(Hit);
+    //        const uint32_t numRays = width * height;
+    //        const uint32_t hitBufferSize = numRays * sizeof(Hit);
 
-            VkBufferCopy cmdCopy = { 0, 0, hitBufferSize };
-            vkCmdCopyBuffer(m_command_buffers.transferToHost, m_buffers.hitsLocal.buffer, m_buffers.hitsStaging.buffer, 1, &cmdCopy);
+    //        VkBufferCopy cmdCopy = { 0, 0, hitBufferSize };
+    //        vkCmdCopyBuffer(m_command_buffers.transferToHost, m_buffers.hitsLocal.buffer, m_buffers.hitsStaging.buffer, 1, &cmdCopy);
 
-            VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.transferToHost));
-        }
+    //        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.transferToHost));
+    //    }
 
-        // Build AO cmd buffer
-        {
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_complete));
+    //    // Build AO cmd buffer
+    //    {
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_complete));
 
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.ao));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.ao));
 
-            // Build command buffer
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.ao, &cmdBufInfo));
+    //        // Build command buffer
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.ao, &cmdBufInfo));
 
-            m_profiler->WriteTimestamp(m_command_buffers.ao, startGenerateAOQuery);
+    //        m_profiler->WriteTimestamp(m_command_buffers.ao, startGenerateAOQuery);
 
-            vkCmdBindPipeline(m_command_buffers.ao, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.ao);
-            vkCmdBindDescriptorSets(m_command_buffers.ao, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.generateRays, 0, 1, &m_descriptor_sets.ao, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.ao, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.ao);
+    //        vkCmdBindDescriptorSets(m_command_buffers.ao, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.generateRays, 0, 1, &m_descriptor_sets.ao, 0, 0);
 
-            uint32_t groupSize = 16;
-            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+    //        uint32_t groupSize = 16;
+    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            vkCmdDispatch(m_command_buffers.ao, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.ao, groupCountX, groupCountY, 1);
 
-            m_profiler->WriteTimestamp(m_command_buffers.ao, endGenerateAOQuery);
+    //        m_profiler->WriteTimestamp(m_command_buffers.ao, endGenerateAOQuery);
 
-            vkEndCommandBuffer(m_command_buffers.ao);
-        }
+    //        vkEndCommandBuffer(m_command_buffers.ao);
+    //    }
 
-        // Build GI cmd buffer
-        {
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_complete));
+    //    // Build GI cmd buffer
+    //    {
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_complete));
 
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.gi));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.gi));
 
-            // Build command buffer
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.gi, &cmdBufInfo));
+    //        // Build command buffer
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.gi, &cmdBufInfo));
 
-            m_profiler->WriteTimestamp(m_command_buffers.gi, startGenerateGIRays);
+    //        m_profiler->WriteTimestamp(m_command_buffers.gi, startGenerateGIRays);
 
-            vkCmdBindPipeline(m_command_buffers.gi, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.gi);
-            vkCmdBindDescriptorSets(m_command_buffers.gi, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.generateRays, 0, 1, &m_descriptor_sets.gi, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.gi, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.gi);
+    //        vkCmdBindDescriptorSets(m_command_buffers.gi, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.generateRays, 0, 1, &m_descriptor_sets.gi, 0, 0);
 
-            uint32_t groupSize = 16;
-            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+    //        uint32_t groupSize = 16;
+    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            vkCmdDispatch(m_command_buffers.gi, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.gi, groupCountX, groupCountY, 1);
 
-            m_profiler->WriteTimestamp(m_command_buffers.gi, endGenerateGIRays);
+    //        m_profiler->WriteTimestamp(m_command_buffers.gi, endGenerateGIRays);
 
-            vkEndCommandBuffer(m_command_buffers.gi);
-        }
+    //        vkEndCommandBuffer(m_command_buffers.gi);
+    //    }
 
-        // Build AO resolve cmd buffer
-        {
-            static const int clearBuffer = 0;
-            static const int preserveBuffer = 1;
+    //    // Build AO resolve cmd buffer
+    //    {
+    //        static const int clearBuffer = 0;
+    //        static const int preserveBuffer = 1;
 
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_resolve_complete));
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_resolve_complete));
 
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.aoResolve));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.aoResolve));
 
-            // Build command buffer for ao resolve
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.aoResolve, &cmdBufInfo));
+    //        // Build command buffer for ao resolve
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.aoResolve, &cmdBufInfo));
 
-            m_profiler->WriteTimestamp(m_command_buffers.aoResolve, startAOResolve);
+    //        m_profiler->WriteTimestamp(m_command_buffers.aoResolve, startAOResolve);
 
-            vkCmdBindPipeline(m_command_buffers.aoResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.aoResolve);
-            vkCmdBindDescriptorSets(m_command_buffers.aoResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.aoResolve, 0, 1, &m_descriptor_sets.aoResolve, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.aoResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.aoResolve);
+    //        vkCmdBindDescriptorSets(m_command_buffers.aoResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.aoResolve, 0, 1, &m_descriptor_sets.aoResolve, 0, 0);
 
-            vkCmdPushConstants(m_command_buffers.aoResolve, m_pipeline_layouts.aoResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &clearBuffer);
+    //        vkCmdPushConstants(m_command_buffers.aoResolve, m_pipeline_layouts.aoResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &clearBuffer);
 
-            uint32_t groupSize = 16;
-            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+    //        uint32_t groupSize = 16;
+    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            vkCmdDispatch(m_command_buffers.aoResolve, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.aoResolve, groupCountX, groupCountY, 1);
 
-            m_profiler->WriteTimestamp(m_command_buffers.aoResolve, endAOResolve);
+    //        m_profiler->WriteTimestamp(m_command_buffers.aoResolve, endAOResolve);
 
-            vkEndCommandBuffer(m_command_buffers.aoResolve);
+    //        vkEndCommandBuffer(m_command_buffers.aoResolve);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.aoResolveAndClear));
-            // Build command buffer for ao resolve and clear
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.aoResolveAndClear, &cmdBufInfo));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.aoResolveAndClear));
+    //        // Build command buffer for ao resolve and clear
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.aoResolveAndClear, &cmdBufInfo));
 
-            vkCmdBindPipeline(m_command_buffers.aoResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.aoResolve);
-            vkCmdBindDescriptorSets(m_command_buffers.aoResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.aoResolve, 0, 1, &m_descriptor_sets.aoResolve, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.aoResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.aoResolve);
+    //        vkCmdBindDescriptorSets(m_command_buffers.aoResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.aoResolve, 0, 1, &m_descriptor_sets.aoResolve, 0, 0);
 
-            vkCmdPushConstants(m_command_buffers.aoResolveAndClear, m_pipeline_layouts.aoResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &preserveBuffer);
+    //        vkCmdPushConstants(m_command_buffers.aoResolveAndClear, m_pipeline_layouts.aoResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &preserveBuffer);
 
-            vkCmdDispatch(m_command_buffers.aoResolveAndClear, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.aoResolveAndClear, groupCountX, groupCountY, 1);
 
-            vkEndCommandBuffer(m_command_buffers.aoResolveAndClear);
-        }
+    //        vkEndCommandBuffer(m_command_buffers.aoResolveAndClear);
+    //    }
 
-        // Build GI resolve cmd buffer
-        {
-            static const int clearBuffer = 0;
-            static const int preserveBuffer = 1;
+    //    // Build GI resolve cmd buffer
+    //    {
+    //        static const int clearBuffer = 0;
+    //        static const int preserveBuffer = 1;
 
-            uint32_t groupSize = 16;
-            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+    //        uint32_t groupSize = 16;
+    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_resolve_complete));
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_resolve_complete));
 
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.giResolve));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.giResolve));
 
-            // Build command buffer for ao resolve
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.giResolve, &cmdBufInfo));
+    //        // Build command buffer for ao resolve
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.giResolve, &cmdBufInfo));
 
-            m_profiler->WriteTimestamp(m_command_buffers.giResolve, startGIResolve);
+    //        m_profiler->WriteTimestamp(m_command_buffers.giResolve, startGIResolve);
 
-            vkCmdBindPipeline(m_command_buffers.giResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.giResolve);
-            vkCmdBindDescriptorSets(m_command_buffers.giResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.giResolve, 0, 1, &m_descriptor_sets.giResolve, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.giResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.giResolve);
+    //        vkCmdBindDescriptorSets(m_command_buffers.giResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.giResolve, 0, 1, &m_descriptor_sets.giResolve, 0, 0);
 
-            vkCmdPushConstants(m_command_buffers.giResolve, m_pipeline_layouts.giResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &clearBuffer);
+    //        vkCmdPushConstants(m_command_buffers.giResolve, m_pipeline_layouts.giResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &clearBuffer);
 
-            vkCmdDispatch(m_command_buffers.giResolve, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.giResolve, groupCountX, groupCountY, 1);
 
-            m_profiler->WriteTimestamp(m_command_buffers.giResolve, endGIResolve);
+    //        m_profiler->WriteTimestamp(m_command_buffers.giResolve, endGIResolve);
 
-            vkEndCommandBuffer(m_command_buffers.giResolve);
+    //        vkEndCommandBuffer(m_command_buffers.giResolve);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.giResolveAndClear));
-            // Build command buffer for ao resolve and clear
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.giResolveAndClear, &cmdBufInfo));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.giResolveAndClear));
+    //        // Build command buffer for ao resolve and clear
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.giResolveAndClear, &cmdBufInfo));
 
-            vkCmdBindPipeline(m_command_buffers.giResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.giResolve);
-            vkCmdBindDescriptorSets(m_command_buffers.giResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.giResolve, 0, 1, &m_descriptor_sets.giResolve, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.giResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.giResolve);
+    //        vkCmdBindDescriptorSets(m_command_buffers.giResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.giResolve, 0, 1, &m_descriptor_sets.giResolve, 0, 0);
 
-            vkCmdPushConstants(m_command_buffers.giResolveAndClear, m_pipeline_layouts.giResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &preserveBuffer);
+    //        vkCmdPushConstants(m_command_buffers.giResolveAndClear, m_pipeline_layouts.giResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &preserveBuffer);
 
-            vkCmdDispatch(m_command_buffers.giResolveAndClear, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.giResolveAndClear, groupCountX, groupCountY, 1);
 
-            vkEndCommandBuffer(m_command_buffers.giResolveAndClear);
-        }
+    //        vkEndCommandBuffer(m_command_buffers.giResolveAndClear);
+    //    }
 
-        // Build GI filter cmd buffer
-        {
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_bilateral_filter_complete));
+    //    // Build GI filter cmd buffer
+    //    {
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_bilateral_filter_complete));
 
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilter));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilter));
 
-            uint32_t groupSize = 16;
-            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+    //        uint32_t groupSize = 16;
+    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            // Build command buffer for ao resolve
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilter, &cmdBufInfo));
+    //        // Build command buffer for ao resolve
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilter, &cmdBufInfo));
 
-            m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, startGIBilateralFilter);
+    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, startGIBilateralFilter);
 
-            vkCmdBindPipeline(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
-            vkCmdBindDescriptorSets(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilter, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
+    //        vkCmdBindDescriptorSets(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilter, 0, 0);
 
-            vkCmdDispatch(m_command_buffers.bilateralFilter, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.bilateralFilter, groupCountX, groupCountY, 1);
 
-            m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, endGIBilateralFilter);
+    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, endGIBilateralFilter);
 
-            vkEndCommandBuffer(m_command_buffers.bilateralFilter);
-        }
+    //        vkEndCommandBuffer(m_command_buffers.bilateralFilter);
+    //    }
 
-        // Build AO filter cmd buffer
-        {
-            VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_bilateral_filter_ao_complete));
+    //    // Build AO filter cmd buffer
+    //    {
+    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_bilateral_filter_ao_complete));
 
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilterAO));
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilterAO));
 
-            // Build command buffer for ao resolve
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilterAO, &cmdBufInfo));
+    //        // Build command buffer for ao resolve
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilterAO, &cmdBufInfo));
 
-            m_profiler->WriteTimestamp(m_command_buffers.bilateralFilterAO, startAOBilateralFilter);
+    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilterAO, startAOBilateralFilter);
 
-            vkCmdBindPipeline(m_command_buffers.bilateralFilterAO, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
-            vkCmdBindDescriptorSets(m_command_buffers.bilateralFilterAO, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilterAO, 0, 0);
+    //        vkCmdBindPipeline(m_command_buffers.bilateralFilterAO, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
+    //        vkCmdBindDescriptorSets(m_command_buffers.bilateralFilterAO, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilterAO, 0, 0);
 
-            uint32_t groupSize = 16;
-            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+    //        uint32_t groupSize = 16;
+    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            vkCmdDispatch(m_command_buffers.bilateralFilterAO, groupCountX, groupCountY, 1);
+    //        vkCmdDispatch(m_command_buffers.bilateralFilterAO, groupCountX, groupCountY, 1);
 
-            m_profiler->WriteTimestamp(m_command_buffers.bilateralFilterAO, endAOBilateralFilter);
+    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilterAO, endAOBilateralFilter);
 
-            vkEndCommandBuffer(m_command_buffers.bilateralFilterAO);
-        }
+    //        vkEndCommandBuffer(m_command_buffers.bilateralFilterAO);
+    //    }
 
-        // Build transfer to host DBG cmd buffer
-        {
-            if (m_command_buffers.dbg_transferRaysToHost == VK_NULL_HANDLE)
-            {
-                VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(m_vulkan_device->computeCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-                VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.dbg_transferRaysToHost));
-            }
+    //    // Build transfer to host DBG cmd buffer
+    //    {
+    //        if (m_command_buffers.dbg_transferRaysToHost == VK_NULL_HANDLE)
+    //        {
+    //            VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(m_vulkan_device->computeCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
+    //            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.dbg_transferRaysToHost));
+    //        }
 
-            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-            vkBeginCommandBuffer(m_command_buffers.dbg_transferRaysToHost, &cmdBufInfo);
+    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+    //        vkBeginCommandBuffer(m_command_buffers.dbg_transferRaysToHost, &cmdBufInfo);
 
-            VkBufferMemoryBarrier memBarries = vks::initializers::bufferMemoryBarrier();
-            memBarries.buffer = m_buffers.raysLocal.buffer;
-            memBarries.offset = 0;
-            memBarries.size = m_buffers.raysLocal.size;
-            memBarries.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            memBarries.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    //        VkBufferMemoryBarrier memBarries = vks::initializers::bufferMemoryBarrier();
+    //        memBarries.buffer = m_buffers.raysLocal.buffer;
+    //        memBarries.offset = 0;
+    //        memBarries.size = m_buffers.raysLocal.size;
+    //        memBarries.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    //        memBarries.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-            vkCmdPipelineBarrier(m_command_buffers.dbg_transferRaysToHost, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &memBarries, 0, nullptr);
+    //        vkCmdPipelineBarrier(m_command_buffers.dbg_transferRaysToHost, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &memBarries, 0, nullptr);
 
-            const uint32_t numRays = width * height;
-            const uint32_t rayBufferSize = numRays * sizeof(Ray);
+    //        const uint32_t numRays = width * height;
+    //        const uint32_t rayBufferSize = numRays * sizeof(Ray);
 
-            VkBufferCopy cmdCopy = { 0, 0, rayBufferSize };
-            vkCmdCopyBuffer(m_command_buffers.dbg_transferRaysToHost, m_buffers.raysLocal.buffer, m_buffers.raysStaging.buffer, 1, &cmdCopy);
+    //        VkBufferCopy cmdCopy = { 0, 0, rayBufferSize };
+    //        vkCmdCopyBuffer(m_command_buffers.dbg_transferRaysToHost, m_buffers.raysLocal.buffer, m_buffers.raysStaging.buffer, 1, &cmdCopy);
 
-            VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.dbg_transferRaysToHost));
-        }
+    //        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.dbg_transferRaysToHost));
+    //    }
 
-        // Build texture repack cmd buffer
-        {
-            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-                vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->computeCommandPool,
-                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                    1);
+    //    // Build texture repack cmd buffer
+    //    {
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->computeCommandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.textureRepack));
-        }
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.textureRepack));
+    //    }
 
-        uint32_t num_rays = width * height;
-        rrBindBuffers(*m_rr_instance, m_buffers.raysLocal.buffer, m_buffers.hitsLocal.buffer, num_rays);
-        auto status = rrTraceRays(*m_rr_instance, RR_QUERY_INTERSECT, num_rays, &m_command_buffers.traceRays);
-    }
+    //    uint32_t num_rays = width * height;
+    //    rrBindBuffers(*m_rr_instance, m_buffers.raysLocal.buffer, m_buffers.hitsLocal.buffer, num_rays);
+    //    auto status = rrTraceRays(*m_rr_instance, RR_QUERY_INTERSECT, num_rays, &m_command_buffers.traceRays);
+    //}
 
     void VkRenderer::RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow)
     {
@@ -857,15 +762,15 @@ namespace Baikal
         PushConsts pushConsts;
         for (auto mesh : scene->meshes)
         {
-            pushConsts.baseDiffuse = mesh.material->baseDiffuse;
-            pushConsts.baseRoughness = mesh.material->baseRoughness;
-            pushConsts.baseMetallic = mesh.material->baseMetallic;
+            pushConsts.baseDiffuse = mesh.material->base_diffuse;
+            pushConsts.baseRoughness = mesh.material->base_roughness;
+            pushConsts.baseMetallic = mesh.material->base_metallic;
 
             uint32_t offset = pushConsts.meshID[0] * static_cast<uint32_t>(scene->transform_alignment);
-            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 1, &offset);
+            vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptor_set, 1, &offset);
             vkCmdPushConstants(cmdBuffer, scene->pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConsts), &pushConsts);
             //vkCmdDrawIndexed(cmdBuffer, mesh.indexCount, 1, 0, mesh.indexBase, 0);
-            vkCmdDrawIndexed(cmdBuffer, mesh.indexCount, 1, mesh.indexBase, 0, 0);
+            vkCmdDrawIndexed(cmdBuffer, mesh.index_count, 1, mesh.index_base, 0, 0);
 
             pushConsts.meshID[0]++;
         }
@@ -876,155 +781,12 @@ namespace Baikal
         auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
         auto const& framebuffers = vk_output->framebuffers;
 
-        VkPipelineInputAssemblyStateCreateInfo inputAssemblyState =
-            vks::initializers::pipelineInputAssemblyStateCreateInfo(
-                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                0,
-                VK_FALSE);
-
-        VkPipelineRasterizationStateCreateInfo rasterizationState =
-            vks::initializers::pipelineRasterizationStateCreateInfo(
-                VK_POLYGON_MODE_FILL,
-                VK_CULL_MODE_NONE,
-                VK_FRONT_FACE_CLOCKWISE,
-                0);
-
-        VkPipelineColorBlendAttachmentState blendAttachmentState =
-            vks::initializers::pipelineColorBlendAttachmentState(
-                0xf,
-                VK_FALSE);
-
-        VkPipelineColorBlendStateCreateInfo colorBlendState =
-            vks::initializers::pipelineColorBlendStateCreateInfo(
-                1,
-                &blendAttachmentState);
-
-        VkPipelineDepthStencilStateCreateInfo depthStencilState =
-            vks::initializers::pipelineDepthStencilStateCreateInfo(
-                VK_TRUE,
-                VK_TRUE,
-                VK_COMPARE_OP_LESS_OR_EQUAL);
-
-        VkPipelineViewportStateCreateInfo viewportState =
-            vks::initializers::pipelineViewportStateCreateInfo(1, 1, 0);
-
-        VkPipelineMultisampleStateCreateInfo multisampleState =
-            vks::initializers::pipelineMultisampleStateCreateInfo(
-                VK_SAMPLE_COUNT_1_BIT,
-                0);
-
-        std::vector<VkDynamicState> dynamicStateEnables = {
-            VK_DYNAMIC_STATE_VIEWPORT,
-            VK_DYNAMIC_STATE_SCISSOR
-        };
-        VkPipelineDynamicStateCreateInfo dynamicState =
-            vks::initializers::pipelineDynamicStateCreateInfo(
-                dynamicStateEnables.data(),
-                static_cast<uint32_t>(dynamicStateEnables.size()),
-                0);
-
-        // Final fullscreen pass pipeline
-        std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages;
-
-        shaderStages[0] = LoadShader(GetAssetPath() + "shaders/deferred.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        shaderStages[1] = LoadShader(GetAssetPath() + "shaders/deferred.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        VkGraphicsPipelineCreateInfo pipelineCreateInfo =
-            vks::initializers::pipelineCreateInfo(
-                m_pipeline_layouts.deferred,
-                framebuffers.draw_render_pass,
-                0);
-
-        pipelineCreateInfo.pVertexInputState = &vertices.inputState;
-        pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
-        pipelineCreateInfo.pRasterizationState = &rasterizationState;
-        pipelineCreateInfo.pColorBlendState = &colorBlendState;
-        pipelineCreateInfo.pMultisampleState = &multisampleState;
-        pipelineCreateInfo.pViewportState = &viewportState;
-        pipelineCreateInfo.pDepthStencilState = &depthStencilState;
-        pipelineCreateInfo.pDynamicState = &dynamicState;
-        pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
-        pipelineCreateInfo.pStages = shaderStages.data();
-
-        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, m_pipeline_cache, 1, &pipelineCreateInfo, nullptr, &m_pipelines.deferred));
-
-        // Debug display pipeline
-        shaderStages[0] = LoadShader(GetAssetPath() + "shaders/debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        shaderStages[1] = LoadShader(GetAssetPath() + "shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, m_pipeline_cache, 1, &pipelineCreateInfo, nullptr, &m_pipelines.debug));
-
-        // Offscreen pipeline
-        shaderStages[0] = LoadShader(GetAssetPath() + "shaders/mrt.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        shaderStages[1] = LoadShader(GetAssetPath() + "shaders/mrt.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-
-        // Separate render pass
-        pipelineCreateInfo.renderPass = framebuffers.deferred->renderPass;
-
-        // Separate layout
-        pipelineCreateInfo.layout = scene->pipelineLayout;// m_pipeline_layouts.offscreen;
-
-                                                          // Blend attachment states required for all color attachments
-                                                          // This is important, as color write mask will otherwise be 0x0 and you
-                                                          // won't see anything rendered to the attachment
-        std::array<VkPipelineColorBlendAttachmentState, 3> blendAttachmentStates =
+        // Pipeline for RT clear
         {
-            vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
-            vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE),
-            vks::initializers::pipelineColorBlendAttachmentState(0xf, VK_FALSE)
-        };
+            VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(m_pipeline_layouts.rtClear, 0);
+            computePipelineCreateInfo.stage = LoadShader(GetAssetPath() + "shaders/rt_clear.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
 
-        colorBlendState.attachmentCount = static_cast<uint32_t>(blendAttachmentStates.size());
-        colorBlendState.pAttachments = blendAttachmentStates.data();
-
-        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, m_pipeline_cache, 1, &pipelineCreateInfo, nullptr, &m_pipelines.offscreen));
-
-        shaderStages[0] = LoadShader(GetAssetPath() + "shaders/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-        shaderStages[1] = LoadShader(GetAssetPath() + "shaders/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
-        // No blend attachment states (no color attachments used)
-        colorBlendState.attachmentCount = 0;
-        // Cull front faces
-        depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-        // Enable depth bias
-        rasterizationState.depthBiasEnable = VK_TRUE;
-        // Add depth bias to dynamic state, so we can change it at runtime
-        dynamicStateEnables.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
-        dynamicState = vks::initializers::pipelineDynamicStateCreateInfo(dynamicStateEnables.data(), static_cast<uint32_t>(dynamicStateEnables.size()), 0);
-
-        pipelineCreateInfo.layout = m_pipeline_layouts.shadow;
-        pipelineCreateInfo.renderPass = framebuffers.shadow[0]->renderPass;
-
-        VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, m_pipeline_cache, 1, &pipelineCreateInfo, nullptr, &m_pipelines.shadow));
-
-        // Pipeline for AO
-        {
-            VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(m_pipeline_layouts.generateRays, 0);
-            computePipelineCreateInfo.stage = LoadShader(GetAssetPath() + "shaders/ao.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-
-            VK_CHECK_RESULT(vkCreateComputePipelines(device, m_pipeline_cache, 1, &computePipelineCreateInfo, nullptr, &m_pipelines.ao));
-        }
-
-        // Pipeline for GI
-        {
-            VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(m_pipeline_layouts.generateRays, 0);
-            computePipelineCreateInfo.stage = LoadShader(GetAssetPath() + "shaders/gi.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-
-            VK_CHECK_RESULT(vkCreateComputePipelines(device, m_pipeline_cache, 1, &computePipelineCreateInfo, nullptr, &m_pipelines.gi));
-        }
-
-        // Pipeline for AO resolve
-        {
-            VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(m_pipeline_layouts.aoResolve, 0);
-            computePipelineCreateInfo.stage = LoadShader(GetAssetPath() + "shaders/ao_resolve.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-
-            VK_CHECK_RESULT(vkCreateComputePipelines(device, m_pipeline_cache, 1, &computePipelineCreateInfo, nullptr, &m_pipelines.aoResolve));
-        }
-
-        // Pipeline for GI resolve
-        {
-            VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(m_pipeline_layouts.giResolve, 0);
-            computePipelineCreateInfo.stage = LoadShader(GetAssetPath() + "shaders/gi_resolve.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-
-            VK_CHECK_RESULT(vkCreateComputePipelines(device, m_pipeline_cache, 1, &computePipelineCreateInfo, nullptr, &m_pipelines.giResolve));
+            VK_CHECK_RESULT(vkCreateComputePipelines(device, m_pipeline_cache, 1, &computePipelineCreateInfo, nullptr, &m_pipelines.rtClear));
         }
 
         // Pipeline for filter
@@ -1074,405 +836,7 @@ namespace Baikal
     void VkRenderer::SetupDescriptorSetLayout()
     {
         auto& device = m_vulkan_device->logicalDevice;
-        // Deferred shading layout
         {
-            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
-            {
-                // Binding 0: Vertex shader uniform buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT,
-                    0),
-                // Binding 1: Packed normals, roughness, metaliness texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    1),
-                // Binding 2: Albedo texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    2),
-                // Binding 3: Motion, roughness, metallic texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    3),
-                // Binding 4: Fragment shader uniform buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    4),
-                // Binding 5: Shadow map 0
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    5),
-                // Binding 6: Shadow map 1
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    6),
-                // Binding 7: Shadow map 2
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    7),
-                // Binding 8: GI texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    8),
-                // Binding 9: AO texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    9)
-
-            };
-
-            VkDescriptorSetLayoutCreateInfo descriptorLayout =
-                vks::initializers::descriptorSetLayoutCreateInfo(
-                    setLayoutBindings.data(),
-                    static_cast<uint32_t>(setLayoutBindings.size()));
-
-            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.deferred));
-
-            VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-                vks::initializers::pipelineLayoutCreateInfo(
-                    &m_descriptor_set_layouts.deferred,
-                    1);
-
-            VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, 2 * sizeof(int), 0);
-            pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-            pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.deferred));
-        }
-
-        // Offscreen rendering
-        {
-
-            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
-            {
-                // Binding 0: Vertex shader uniform buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    VK_SHADER_STAGE_VERTEX_BIT,
-                    0),
-                // Binding 1: Albedo texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    1),
-                // Binding 2: Roughness texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    2),
-                // Binding 3: Normals texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    3),
-                // Binding 4: Metaliness texture
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_FRAGMENT_BIT,
-                    4)
-            };
-
-            VkDescriptorSetLayoutCreateInfo descriptorLayout =
-                vks::initializers::descriptorSetLayoutCreateInfo(
-                    setLayoutBindings.data(),
-                    static_cast<uint32_t>(setLayoutBindings.size()));
-
-            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.offscreen));
-
-            VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-                vks::initializers::pipelineLayoutCreateInfo(
-                    &m_descriptor_set_layouts.offscreen,
-                    1);
-
-            // Offscreen (scene) rendering pipeline layout
-            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.offscreen));
-        }
-
-        // Shadow pipeline layout
-        {
-            // Shadow rendering
-            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings =
-            {
-                // Binding 0: Vertex shader uniform buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    VK_SHADER_STAGE_VERTEX_BIT,
-                    0)
-            };
-
-            VkDescriptorSetLayoutCreateInfo descriptorLayout =
-                vks::initializers::descriptorSetLayoutCreateInfo(
-                    setLayoutBindings.data(),
-                    static_cast<uint32_t>(setLayoutBindings.size()));
-
-            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.shadow));
-
-            VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo = vks::initializers::pipelineLayoutCreateInfo(&m_descriptor_set_layouts.shadow, 1);
-            VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, sizeof(int), 0);
-            pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-            pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-            // Shadow rendering pipeline layout
-            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.shadow));
-        }
-
-        // Generate rays layout
-        {
-            std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-                // Binding 0 : Sampled image (depth)
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    VK_SHADER_STAGE_COMPUTE_BIT,
-                    0),
-                // Binding 2 : Uniform buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    VK_SHADER_STAGE_COMPUTE_BIT,
-                    2),
-                // Binding 3 : Ray buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    VK_SHADER_STAGE_COMPUTE_BIT,
-                    3),
-                // Binding 4 : RNG buffer
-                vks::initializers::descriptorSetLayoutBinding(
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    VK_SHADER_STAGE_COMPUTE_BIT,
-                    4)
-            };
-
-            VkDescriptorSetLayoutCreateInfo descriptorLayout =
-                vks::initializers::descriptorSetLayoutCreateInfo(
-                    setLayoutBindings.data(),
-                    (uint32_t)setLayoutBindings.size());
-
-            VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.generateRays));
-
-            VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-                vks::initializers::pipelineLayoutCreateInfo(
-                    &m_descriptor_set_layouts.generateRays,
-                    1);
-
-            VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.generateRays));
-
-            // AO resolve layout
-            {
-                std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-                    // Binding 0 : AO storage image
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        0),
-                    // Binding 1 : Uniform buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        1),
-                    // Binding 2 : Hit buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        2),
-                    // Binding 3 : Shapes buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        3),
-                    // Binding 4 : Material buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        4),
-                    // Binding 5 : Index buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        5),
-                    // Binding 6 : Material buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        6),
-                    // Binding 7 : Ray buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        7),
-                    // Binding 8 : Texture descriptors buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        8),
-                    // Binding 9 : Texture data buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        9),
-                    // Binding 10: Packed depth and mesh ID
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        10),
-                    // Binding 11: Packed normals, roughness, metaliness texture
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        11),
-                    // Binding 12: Albedo
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        12),
-                    // Binding 5: Shadow map 0
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        13),
-                    // Binding 6: Shadow map 1
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        14),
-                    // Binding 7: Shadow map 2
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        15),
-                };
-
-                VkDescriptorSetLayoutCreateInfo descriptorLayout =
-                    vks::initializers::descriptorSetLayoutCreateInfo(
-                        setLayoutBindings.data(),
-                        (uint32_t)setLayoutBindings.size());
-
-                VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.aoResolve));
-
-                VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-                    vks::initializers::pipelineLayoutCreateInfo(
-                        &m_descriptor_set_layouts.aoResolve,
-                        1);
-
-                VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(int), 0);
-                pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-                pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-                VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.aoResolve));
-            }
-
-            // GI resolve layout
-            {
-                std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
-                    // Binding 0 : GI storage image
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        0),
-                    // Binding 1 : Uniform buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        1),
-                    // Binding 2 : Hit buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        2),
-                    // Binding 3 : Shapes buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        3),
-                    // Binding 4 : Material buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        4),
-                    // Binding 5 : Index buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        5),
-                    // Binding 6 : Material buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        6),
-                    // Binding 7 : Ray buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        7),
-                    // Binding 8 : Texture descriptors buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        8),
-                    // Binding 9 : Texture data buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        9),
-                    // Binding 10: Packed depth and mesh ID
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        10),
-                    // Binding 11: Packed normals, roughness, metaliness texture
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        11),
-                    // Binding 12: Albedo
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        12),
-                    // Binding 5: Shadow map 0
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        13),
-                    // Binding 6: Shadow map 1
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        14),
-                    // Binding 7: Shadow map 2
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        15),
-                };
-
-                VkDescriptorSetLayoutCreateInfo descriptorLayout =
-                    vks::initializers::descriptorSetLayoutCreateInfo(
-                        setLayoutBindings.data(),
-                        (uint32_t)setLayoutBindings.size());
-
-                VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.giResolve));
-
-                VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-                    vks::initializers::pipelineLayoutCreateInfo(
-                        &m_descriptor_set_layouts.giResolve,
-                        1);
-
-                VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_COMPUTE_BIT, sizeof(int), 0);
-                pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-                pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-                VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.giResolve));
-            }
-
             // Filter pipeline layout
             {
                 std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
@@ -1481,27 +845,32 @@ namespace Baikal
                         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                         VK_SHADER_STAGE_COMPUTE_BIT,
                         0),
-                    // Binding 1 : Depth, normals, mesh id
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        1),
-                    // Binding 2 : Uniform buffer
-                    vks::initializers::descriptorSetLayoutBinding(
-                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                        VK_SHADER_STAGE_COMPUTE_BIT,
-                        2),
-                    // Binding 3 : GI filter result
+                    // Binding 1 : SampleCount
                     vks::initializers::descriptorSetLayoutBinding(
                         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                         VK_SHADER_STAGE_COMPUTE_BIT,
-                        3)
+                        1),
+                    // Binding 2 : Depth, normals, mesh id
+                    vks::initializers::descriptorSetLayoutBinding(
+                        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                        VK_SHADER_STAGE_COMPUTE_BIT,
+                        2),
+                    // Binding 3 : Uniform buffer
+                    vks::initializers::descriptorSetLayoutBinding(
+                        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                        VK_SHADER_STAGE_COMPUTE_BIT,
+                        3),
+                    // Binding 4 : GI filter result
+                    vks::initializers::descriptorSetLayoutBinding(
+                        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        VK_SHADER_STAGE_COMPUTE_BIT,
+                        4)
                 };
 
                 VkDescriptorSetLayoutCreateInfo descriptorLayout =
                     vks::initializers::descriptorSetLayoutCreateInfo(
                         setLayoutBindings.data(),
-                        (uint32_t)setLayoutBindings.size());
+                        setLayoutBindings.size());
 
                 VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.bilateralFilter));
 
@@ -1536,7 +905,7 @@ namespace Baikal
                 VkDescriptorSetLayoutCreateInfo descriptorLayout =
                     vks::initializers::descriptorSetLayoutCreateInfo(
                         setLayoutBindings.data(),
-                        (uint32_t)setLayoutBindings.size());
+                        setLayoutBindings.size());
 
                 VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.textureRepack));
 
@@ -1551,6 +920,36 @@ namespace Baikal
 
                 VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.textureRepack));
             }
+
+            // Clear RT results layout
+            {
+                std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+                    // Binding 0 : AO storage image
+                    vks::initializers::descriptorSetLayoutBinding(
+                        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        VK_SHADER_STAGE_COMPUTE_BIT,
+                        0),
+                    // Binding 1 : SampleCount image
+                    vks::initializers::descriptorSetLayoutBinding(
+                        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                        VK_SHADER_STAGE_COMPUTE_BIT,
+                        1)
+                };
+
+                VkDescriptorSetLayoutCreateInfo descriptorLayout =
+                    vks::initializers::descriptorSetLayoutCreateInfo(
+                        setLayoutBindings.data(),
+                        setLayoutBindings.size());
+
+                VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &m_descriptor_set_layouts.rtClear));
+
+                VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
+                    vks::initializers::pipelineLayoutCreateInfo(
+                        &m_descriptor_set_layouts.rtClear,
+                        1);
+
+                VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &m_pipeline_layouts.rtClear));
+            }
         }
     }
     
@@ -1562,499 +961,10 @@ namespace Baikal
         int width = framebuffers.deferred->width;
         int height = framebuffers.deferred->height;
 
-        textures.ao.destroy();
-        textures.filteredAO.destroy();
-        textures.gi.destroy();
-        textures.filteredGI.destroy();
-
-        PrepareTextureTarget(&textures.ao, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
-        PrepareTextureTarget(&textures.filteredAO, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
-        PrepareTextureTarget(&textures.gi, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
-        PrepareTextureTarget(&textures.filteredGI, width, height, VK_FORMAT_R32G32B32A32_SFLOAT);
-
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-
-        // Deferred descriptor set
-        {
-            //recreate
-            if (m_descriptor_sets.deferred)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.deferred);
-            }
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.deferred,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.deferred));
-
-            // Image descriptors for the offscreen color attachments
-            VkDescriptorImageInfo texDescriptorData0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[0].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorAlbedo =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[1].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorData1 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[2].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorShadowMap0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.shadow[0]->sampler,
-                    framebuffers.shadow[0]->attachments[0].view,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorShadowMap1 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.shadow[1]->sampler,
-                    framebuffers.shadow[1]->attachments[0].view,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorShadowMap2 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.shadow[2]->sampler,
-                    framebuffers.shadow[2]->attachments[0].view,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-
-
-            writeDescriptorSets = {
-                // Binding 0: Vertex shader uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    0,
-                    &m_uniform_buffers.vsFullScreen.descriptor),
-                // Binding 1: View space normals, depth, mesh id
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    1,
-                    &texDescriptorData0),
-                // Binding 2: Albedo texture
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    2,
-                    &texDescriptorAlbedo),
-                // Binding 3: Motion vectors, roughness, metallic
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    3,
-                    &texDescriptorData1),
-                // Binding 4: Fragment shader uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    4,
-                    &m_uniform_buffers.fsLights.descriptor),
-                // Binding 5: Shadow map
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    5,
-                    &texDescriptorShadowMap0),
-                // Binding 6: Shadow map
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    6,
-                    &texDescriptorShadowMap1),
-                // Binding 7: Shadow map
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    7,
-                    &texDescriptorShadowMap2),
-                // Binding 8: GI texture
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    8,
-                    &textures.filteredGI.descriptor),
-                // Binding 9: AO texture
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.deferred,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    9,
-                    &textures.filteredAO.descriptor)
-            };
-
-            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-        };
-
-        // Shadow map descriptor set
-        {
-
-            if (m_descriptor_sets.shadow)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.shadow);
-            }
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.shadow,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.shadow));
-
-            writeDescriptorSets = {
-                vks::initializers::writeDescriptorSet(m_descriptor_sets.shadow, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 0, &m_uniform_buffers.fsLights.descriptor)
-            };
-
-            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-        }
-
-        // AO descriptor set
-        {
-            if (m_descriptor_sets.ao)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.ao);
-            }
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.generateRays,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.ao));
-
-            // Image descriptors for the offscreen color attachments
-            VkDescriptorImageInfo texDescriptorData0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[0].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorBufferInfo rngBufferDescriptor = {
-                scene->raytrace_RNG_buffer.buffer,
-                0,
-                scene->raytrace_RNG_buffer.size
-            };
-
-            writeDescriptorSets =
-            {
-                // Binding 0 : Sampled image (normals, depth, mesh id)
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.ao,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    0,
-                    &texDescriptorData0),
-                // Binding 2 : Uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.ao,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    2,
-                    &m_uniform_buffers.fsLights.descriptor),
-                // Binding 3 : Ray buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.ao,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    3,
-                    &m_buffers.raysLocal.descriptor),
-                // Binding 4 : RNG buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.ao,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    4,
-                    &rngBufferDescriptor)
-            };
-
-            vkUpdateDescriptorSets(device, (uint32_t)writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-        }
-
-        // GI descriptor set
-        {
-            if (m_descriptor_sets.gi)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.gi);
-            }
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.generateRays,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.gi));
-
-            // Image descriptors for the offscreen color attachments
-            VkDescriptorImageInfo texDescriptorData0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[0].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorBufferInfo rngBufferDescriptor = {
-                scene->raytrace_RNG_buffer.buffer,
-                0,
-                scene->raytrace_RNG_buffer.size
-            };
-
-            writeDescriptorSets =
-            {
-                // Binding 0 : Sampled image (normals, depth, mesh id)
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.gi,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    0,
-                    &texDescriptorData0),
-                // Binding 2 : Uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.gi,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    2,
-                    &m_uniform_buffers.fsLights.descriptor),
-                // Binding 3 : Ray buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.gi,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    3,
-                    &m_buffers.raysLocal.descriptor),
-                // Binding 4 : RNG buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.gi,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    4,
-                    &rngBufferDescriptor)
-            };
-
-            vkUpdateDescriptorSets(device, (uint32_t)writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-        }
-
-        // AO resolve descriptor set
-        {
-            if (m_descriptor_sets.aoResolve)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.aoResolve);
-            }
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.aoResolve,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.aoResolve));
-
-            writeDescriptorSets =
-            {
-                // Binding 0 : Storage AO
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.aoResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    0,
-                    &textures.ao.descriptor),
-                // Binding 1 : Uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.aoResolve,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    1,
-                    &m_uniform_buffers.fsLights.descriptor),
-                // Binding 2 : Hit buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.aoResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    2,
-                    &m_buffers.hitsLocal.descriptor)
-            };
-
-            vkUpdateDescriptorSets(device, (uint32_t)writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-        }
-
-        // GI resolve descriptor set
-        {
-            if (m_descriptor_sets.giResolve)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.giResolve);
-            }
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.giResolve,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.giResolve));
-
-            VkDescriptorBufferInfo shapeBufferDescriptor = {
-                scene->raytrace_shape_buffer.buffer,
-                0,
-                scene->raytrace_shape_buffer.size
-            };
-
-            VkDescriptorBufferInfo materialBufferDescriptor = {
-                scene->raytrace_material_buffer.buffer,
-                0,
-                scene->raytrace_material_buffer.size
-            };
-
-            VkDescriptorBufferInfo indexBufferDescriptor = {
-                scene->index_buffer.buffer,
-                0,
-                scene->index_buffer.size
-            };
-
-            VkDescriptorBufferInfo vertexBufferDescriptor = {
-                scene->raytrace_vertex_buffer.buffer,
-                0,
-                scene->raytrace_vertex_buffer.size
-            };
-
-            VkDescriptorImageInfo texDescriptorData0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[0].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorAlbedo =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[1].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorData1 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[2].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorShadowMap0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.shadow[0]->sampler,
-                    framebuffers.shadow[0]->attachments[0].view,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorShadowMap1 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.shadow[1]->sampler,
-                    framebuffers.shadow[1]->attachments[0].view,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-
-            VkDescriptorImageInfo texDescriptorShadowMap2 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.shadow[2]->sampler,
-                    framebuffers.shadow[2]->attachments[0].view,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
-
-
-            writeDescriptorSets =
-            {
-                // Binding 0 : Storage AO
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    0,
-                    &textures.gi.descriptor),
-                // Binding 1 : Uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    1,
-                    &m_uniform_buffers.fsLights.descriptor),
-                // Binding 2 : Hit buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    2,
-                    &m_buffers.hitsLocal.descriptor),
-                // Binding 3 : Shapes buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    3,
-                    &shapeBufferDescriptor),
-                // Binding 4 : Material buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    4,
-                    &materialBufferDescriptor),
-                // Binding 5 : Index buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    5,
-                    &indexBufferDescriptor),
-                // Binding 6 : Vertex buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    6,
-                    &vertexBufferDescriptor),
-                // Binding 7 : Ray buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    7,
-                    &m_buffers.raysLocal.descriptor),
-                // Binding 8 : Texture descriptors buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    8,
-                    &m_buffers.textures.descriptor),
-                // Binding 9 : Texture descriptors buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    9,
-                    &m_buffers.textureData.descriptor),
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    10,
-                    &texDescriptorData0),
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    11,
-                    &texDescriptorData1),
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    12,
-                    &texDescriptorAlbedo),
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    13,
-                    &texDescriptorShadowMap0),
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    14,
-                    &texDescriptorShadowMap1),
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.giResolve,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    15,
-                    &texDescriptorShadowMap2),
-            };
-
-            vkUpdateDescriptorSets(device, (uint32_t)writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-        }
 
         // Bilateral filter descriptor set
         {
-            if (m_descriptor_sets.bilateralFilter)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.bilateralFilter);
-            }
-
-            VkDescriptorImageInfo texDescriptorData0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[0].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -2070,87 +980,32 @@ namespace Baikal
                     m_descriptor_sets.bilateralFilter,
                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                     0,
-                    &textures.gi.descriptor),
-                // Binding 1 : Depth buffer, normals and mesh id
+                    &textures.traceResults.descriptor),
+                // Binding 1 : SampleCount
                 vks::initializers::writeDescriptorSet(
                     m_descriptor_sets.bilateralFilter,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                     1,
-                    &texDescriptorData0),
-                // Binding 2 : Uniform buffer
+                    &textures.sampleCounters.descriptor),
+                // Binding 3 : Uniform buffer
                 vks::initializers::writeDescriptorSet(
                     m_descriptor_sets.bilateralFilter,
                     VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    2,
+                    3,
                     &m_uniform_buffers.fsLights.descriptor),
-                // Binding 3 : Filtered buffer
+                // Binding 4 : Filtered buffer
                 vks::initializers::writeDescriptorSet(
                     m_descriptor_sets.bilateralFilter,
                     VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    3,
-                    &textures.filteredGI.descriptor)
+                    4,
+                    &textures.filteredTraceResults.descriptor)
             };
 
-            vkUpdateDescriptorSets(device, (uint32_t)writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-        }
-
-        // Bilateral filter AO descriptor set
-        {
-            if (m_descriptor_sets.bilateralFilterAO)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.bilateralFilterAO);
-            }
-            VkDescriptorImageInfo texDescriptorData0 =
-                vks::initializers::descriptorImageInfo(
-                    framebuffers.deferred->sampler,
-                    framebuffers.deferred->attachments[0].view,
-                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    descriptorPool,
-                    &m_descriptor_set_layouts.bilateralFilter,
-                    1);
-
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.bilateralFilterAO));
-
-            writeDescriptorSets =
-            {
-                // Binding 0 : GI
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.bilateralFilterAO,
-                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    0,
-                    &textures.ao.descriptor),
-                // Binding 1 : Depth buffer, normals and mesh id
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.bilateralFilterAO,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    1,
-                    &texDescriptorData0),
-                // Binding 2 : Uniform buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.bilateralFilterAO,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                    2,
-                    &m_uniform_buffers.fsLights.descriptor),
-                // Binding 3 : Filtered buffer
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.bilateralFilterAO,
-                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                    3,
-                    &textures.filteredAO.descriptor)
-            };
-
-            vkUpdateDescriptorSets(device, (uint32_t)writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+            vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
         }
 
         // Texture repack filter descriptor set
         {
-            if (m_descriptor_sets.textureRepack)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.textureRepack);
-            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
@@ -2178,31 +1033,32 @@ namespace Baikal
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
         }
 
-        // Debug view descriptor set
+        // Clear RT results descriptor set
         {
-            if (m_descriptor_sets.debug)
-            {
-                vkFreeDescriptorSets(device, descriptorPool, 1, &m_descriptor_sets.debug);
-            }
             VkDescriptorSetAllocateInfo allocInfo =
                 vks::initializers::descriptorSetAllocateInfo(
                     descriptorPool,
-                    &m_descriptor_set_layouts.deferred,
+                    &m_descriptor_set_layouts.rtClear,
                     1);
 
-            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.debug));
+            VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &allocInfo, &m_descriptor_sets.rtClear));
 
             writeDescriptorSets =
             {
-                // Binding 0: Vertex shader uniform buffer
+                // Binding 0 : Storage AO
                 vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.debug,
-                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                    m_descriptor_sets.rtClear,
+                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                     0,
-                    &m_uniform_buffers.vsFullScreen.descriptor)
+                    &textures.traceResults.descriptor),
+                vks::initializers::writeDescriptorSet(
+                    m_descriptor_sets.rtClear,
+                    VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                    1,
+                    &textures.sampleCounters.descriptor)
             };
 
-            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+            vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
         }
     }
     
@@ -2470,7 +1326,8 @@ namespace Baikal
         m_buffers.textures.destroy();
         m_buffers.textureData.destroy();
 
-        const uint32_t numTextures = (uint32_t)scene->resources.textures->resources.size();
+        const TextureList& tex_list = scene->resources->GetTextures();
+        const uint32_t numTextures = (uint32_t)tex_list.GetNumResources();
         const uint32_t texDescBufferSize = sizeof(Texture) * numTextures;
 
         VK_CHECK_RESULT(m_vulkan_device->createBuffer(
@@ -2484,7 +1341,7 @@ namespace Baikal
 
         for (size_t i = 0; i < scene->materials.size(); i++)
         {
-            vks::Texture& tex = *scene->materials[i].diffuse;
+            vks::Texture tex = scene->materials[i].diffuse;
 
             // All texture must have power of 2 size: check
             assert(tex.width && (!(tex.width & (tex.width - 1))));
@@ -2614,7 +1471,7 @@ namespace Baikal
         vertices.inputState.pVertexAttributeDescriptions = vertices.attributeDescriptions.data();
     }
 
-    void VkRenderer::BuildDrawCommandBuffers()
+    void VkRenderer::BuildCommandBuffers()
     {
         auto& device = m_vulkan_device->logicalDevice;
         auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
@@ -2622,73 +1479,261 @@ namespace Baikal
         int width = vk_output->width();
         int height = vk_output->height();
 
-        if (!m_command_buffers.drawCmdBuffers)
+        // Build clear command buffer
         {
             VkCommandBufferAllocateInfo cmdBufAllocateInfo =
                 vks::initializers::commandBufferAllocateInfo(
-                    m_vulkan_device->commandPool,
+                    m_vulkan_device->computeCommandPool,
                     VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                     1);
 
-            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.drawCmdBuffers));
+            if (m_command_buffers.rtClear == VK_NULL_HANDLE)
+            {
+                VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.rtClear));
+            }
+
+            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.rtClear, &cmdBufInfo));
+
+            vkCmdBindPipeline(m_command_buffers.rtClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.rtClear);
+            vkCmdBindDescriptorSets(m_command_buffers.rtClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.rtClear, 0, 1, &m_descriptor_sets.rtClear, 0, 0);
+
+            uint32_t groupSize = 16;
+            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
+
+            vkCmdDispatch(m_command_buffers.rtClear, groupCountX, groupCountY, 1);
+
+            vkEndCommandBuffer(m_command_buffers.rtClear);
         }
 
-        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-        VkClearValue clearValues[2];
-        clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-        clearValues[1].depthStencil = { 1.0f, 0 };
-
-        VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-        renderPassBeginInfo.renderPass = framebuffers.draw_render_pass;
-        renderPassBeginInfo.renderArea.offset.x = 0;
-        renderPassBeginInfo.renderArea.offset.y = 0;
-        renderPassBeginInfo.renderArea.extent.width = width;
-        renderPassBeginInfo.renderArea.extent.height = height;
-        renderPassBeginInfo.clearValueCount = 2;
-        renderPassBeginInfo.pClearValues = clearValues;
-
-        auto& drawCmdBuffers = m_command_buffers.drawCmdBuffers;
-        bool aoEnabled = true;
-        bool giEnabled = true;
-
+        // Build GI filter cmd buffer
         {
-            // Set target frame buffer
-            renderPassBeginInfo.framebuffer = framebuffers.draw_fb;
+            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+                vks::initializers::commandBufferAllocateInfo(
+                    m_vulkan_device->computeCommandPool,
+                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                    1);
 
-            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.drawCmdBuffers, &cmdBufInfo));
+            if (m_command_buffers.bilateralFilter == VK_NULL_HANDLE)
+            {
+                VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilter));
+            }
 
-            vkCmdBeginRenderPass(drawCmdBuffers, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            uint32_t groupSize = 16;
+            uint32_t groupCountX = (width + groupSize - 1) / groupSize;
+            uint32_t groupCountY = (height + groupSize - 1) / groupSize;
 
-            VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
-            vkCmdSetViewport(drawCmdBuffers, 0, 1, &viewport);
+            // Build command buffer for ao resolve
+            VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+            VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilter, &cmdBufInfo));
 
-            VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
-            vkCmdSetScissor(drawCmdBuffers, 0, 1, &scissor);
+            m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, m_filter.first);
 
-            VkDeviceSize offsets[1] = { 0 };
-            vkCmdBindDescriptorSets(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.deferred, 0, NULL);
+            vkCmdBindPipeline(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
+            vkCmdBindDescriptorSets(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilter, 0, 0);
 
-            int drawMode[] = { giEnabled ? 1 : 0, aoEnabled ? 1 : 0 };
-            vkCmdPushConstants(drawCmdBuffers, m_pipeline_layouts.deferred, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 2 * sizeof(int), drawMode);
+            vkCmdDispatch(m_command_buffers.bilateralFilter, groupCountX, groupCountY, 1);
 
-            // Final composition as full screen quad
-            vkCmdBindPipeline(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.deferred);
-            vkCmdBindVertexBuffers(drawCmdBuffers, VERTEX_BUFFER_BIND_ID, 1, &models.quad.vertices.buffer, offsets);
-            vkCmdBindIndexBuffer(drawCmdBuffers, models.quad.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(drawCmdBuffers, 6, 1, 0, 0, 0);
+            m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, m_filter.second);
 
-            //if (debugViewEnabled)
-            //{
-            //    vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.deferred, 0, 1, &descriptorSets.debug, 0, NULL);
-            //    vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.debug);
-            //    vkCmdDrawIndexed(drawCmdBuffers[i], 6, numDebugImages, 0, 0, 0);
-            //}
+            vkEndCommandBuffer(m_command_buffers.bilateralFilter);
+        }
 
-            vkCmdEndRenderPass(drawCmdBuffers);
+        // Build texture repack cmd buffer
+        if (m_command_buffers.textureRepack == VK_NULL_HANDLE)
+        {
+            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+                vks::initializers::commandBufferAllocateInfo(
+                    m_vulkan_device->computeCommandPool,
+                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                    1);
 
-            VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers));
+            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.textureRepack));
         }
     }
 
+    //void VkRenderer::BuildDrawCommandBuffers()
+    //{
+    //    auto& device = m_vulkan_device->logicalDevice;
+    //    auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
+    //    auto const& framebuffers = vk_output->framebuffers;
+    //    int width = vk_output->width();
+    //    int height = vk_output->height();
+
+    //    if (!m_command_buffers.drawCmdBuffers)
+    //    {
+    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+    //            vks::initializers::commandBufferAllocateInfo(
+    //                m_vulkan_device->commandPool,
+    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+    //                1);
+
+    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.drawCmdBuffers));
+    //    }
+
+    //    VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+
+    //    VkClearValue clearValues[2];
+    //    clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+    //    clearValues[1].depthStencil = { 1.0f, 0 };
+
+    //    VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
+    //    renderPassBeginInfo.renderPass = framebuffers.draw_render_pass;
+    //    renderPassBeginInfo.renderArea.offset.x = 0;
+    //    renderPassBeginInfo.renderArea.offset.y = 0;
+    //    renderPassBeginInfo.renderArea.extent.width = width;
+    //    renderPassBeginInfo.renderArea.extent.height = height;
+    //    renderPassBeginInfo.clearValueCount = 2;
+    //    renderPassBeginInfo.pClearValues = clearValues;
+
+    //    auto& drawCmdBuffers = m_command_buffers.drawCmdBuffers;
+    //    bool aoEnabled = true;
+    //    bool giEnabled = true;
+
+    //    {
+    //        // Set target frame buffer
+    //        renderPassBeginInfo.framebuffer = framebuffers.draw_fb;
+
+    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.drawCmdBuffers, &cmdBufInfo));
+
+    //        vkCmdBeginRenderPass(drawCmdBuffers, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    //        VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
+    //        vkCmdSetViewport(drawCmdBuffers, 0, 1, &viewport);
+
+    //        VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
+    //        vkCmdSetScissor(drawCmdBuffers, 0, 1, &scissor);
+
+    //        VkDeviceSize offsets[1] = { 0 };
+    //        vkCmdBindDescriptorSets(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.deferred, 0, NULL);
+
+    //        int drawMode[] = { giEnabled ? 1 : 0, aoEnabled ? 1 : 0 };
+    //        vkCmdPushConstants(drawCmdBuffers, m_pipeline_layouts.deferred, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 2 * sizeof(int), drawMode);
+
+    //        // Final composition as full screen quad
+    //        vkCmdBindPipeline(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.deferred);
+    //        vkCmdBindVertexBuffers(drawCmdBuffers, VERTEX_BUFFER_BIND_ID, 1, &models.quad.vertices.buffer, offsets);
+    //        vkCmdBindIndexBuffer(drawCmdBuffers, models.quad.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+    //        vkCmdDrawIndexed(drawCmdBuffers, 6, 1, 0, 0, 0);
+
+    //        //if (debugViewEnabled)
+    //        //{
+    //        //    vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.debug, 0, NULL);
+    //        //    vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.debug);
+    //        //    vkCmdDrawIndexed(drawCmdBuffers[i], 6, numDebugImages, 0, 0, 0);
+    //        //}
+
+    //        vkCmdEndRenderPass(drawCmdBuffers);
+
+    //        VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers));
+    //    }
+    //}
+
+    void VkRenderer::InitRte(VkScene* scene)
+    {
+        auto device = m_vulkan_device->logicalDevice;
+        auto output = GetOutput(Baikal::OutputType::kColor);
+        int height = output->height();
+        int width = output->width();
+
+        rte_scene rteScene;
+        rteScene.camera = m_uniform_buffers.fsLights.descriptor;
+
+        VkDescriptorBufferInfo shapeBufferDescriptor = {
+            scene->raytrace_shape_buffer.buffer,
+            0,
+            scene->raytrace_shape_buffer.size
+        };
+
+        VkDescriptorBufferInfo materialBufferDescriptor = {
+            scene->raytrace_material_buffer.buffer,
+            0,
+            scene->raytrace_material_buffer.size
+        };
+
+        VkDescriptorBufferInfo indexBufferDescriptor = {
+            scene->index_buffer.buffer,
+            0,
+            scene->index_buffer.size
+        };
+
+        VkDescriptorBufferInfo vertexBufferDescriptor = {
+            scene->vertex_buffer.buffer,
+            0,
+            scene->vertex_buffer.size
+        };
+
+        VkDescriptorBufferInfo lightsBufferDescriptor = {
+            scene->raytrace_lights_buffer.buffer,
+            0,
+            scene->raytrace_lights_buffer.size
+        };
+
+        rteScene.shapes = shapeBufferDescriptor;
+        rteScene.vertices = vertexBufferDescriptor;
+        rteScene.indices = indexBufferDescriptor;
+        rteScene.materials = materialBufferDescriptor;
+        rteScene.textures = m_buffers.textureData.descriptor;
+        rteScene.textureDescs = m_buffers.textures.descriptor;
+        rteScene.lights = lightsBufferDescriptor;
+        rteScene.numLights = 3;
+
+        VkDescriptorImageInfo shadow_buffer_attachments[3] = {
+            vks::initializers::descriptorImageInfo(m_shadow_pass->GetFrameBuffer(0)->sampler, m_shadow_pass->GetFrameBuffer(0)->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            vks::initializers::descriptorImageInfo(m_shadow_pass->GetFrameBuffer(1)->sampler, m_shadow_pass->GetFrameBuffer(1)->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            vks::initializers::descriptorImageInfo(m_shadow_pass->GetFrameBuffer(2)->sampler, m_shadow_pass->GetFrameBuffer(2)->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) };
+
+        rteScene.shadowMap0 = shadow_buffer_attachments[0];
+        rteScene.shadowMap1 = shadow_buffer_attachments[1];
+        rteScene.shadowMap2 = shadow_buffer_attachments[2];
+
+        rteSetScene(m_rte_instance, &rteScene);
+
+        vks::Framebuffer* g_buffer = m_gbuffer_pass->GetFrameBuffer();
+
+        VkDescriptorImageInfo g_buffer_attachments[3] = {
+            vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[1].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[2].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) };
+
+        rte_gbuffer rteGBuffer;
+        rteGBuffer.depthAndNormal = g_buffer_attachments[0];
+        rteGBuffer.albedo = g_buffer_attachments[1];
+        rteGBuffer.pbrInputs = g_buffer_attachments[2];
+
+        rteSetGBuffer(m_rte_instance, &rteGBuffer);
+
+        rte_output rteOutput;
+        rteOutput.image = textures.traceResults.descriptor;
+        rteOutput.sampleCounter = textures.sampleCounters.descriptor;
+        rteOutput.width = width;
+        rteOutput.height = height;
+        rteSetOutput(m_rte_instance, &rteOutput);
+
+        VkCommandBuffer cmdBuffers[2] = { nullptr, nullptr };
+        rteCommit(m_rte_instance, RTE_EFFECT_AO, &cmdBuffers[0]);
+        rteCommit(m_rte_instance, RTE_EFFECT_INDIRECT_GLOSSY, &cmdBuffers[1]);
+
+        VkQueue computeQueue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &computeQueue);
+
+        // Gbuffer rendering
+        VkSubmitInfo submitInfo;
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.waitSemaphoreCount = 0;
+        VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        submitInfo.pWaitDstStageMask = &stageFlags;
+        submitInfo.pSignalSemaphores = nullptr;
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.pCommandBuffers = cmdBuffers;
+        submitInfo.commandBufferCount = 2;
+        VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &submitInfo, VK_NULL_HANDLE));
+        vkQueueWaitIdle(computeQueue);
+
+        vkFreeCommandBuffers(device, m_vulkan_device->computeCommandPool, 2, cmdBuffers);
+
+        rteCalculate(m_rte_instance, RTE_EFFECT_AO, &m_command_buffers.ao[0], 3, nullptr);
+        rteCalculate(m_rte_instance, RTE_EFFECT_INDIRECT_GLOSSY, &m_command_buffers.gi[0], 17, nullptr);
+    }
 }

@@ -12,9 +12,10 @@ struct Light
 };
 
 layout (local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
-layout (binding = 0, rgba32f) uniform image2D giImage;
-layout (binding = 1) uniform usampler2D samplerData0;
-layout (binding = 2) uniform UBO 
+layout (binding = 0, rgba16f) uniform image2D image;
+layout (binding = 1, rg16ui) uniform uimage2D sampleCount;
+layout (binding = 2) uniform usampler2D samplerData0;
+layout (binding = 3) uniform UBO 
 {
     vec4 viewPos;
     mat4 view;
@@ -24,19 +25,22 @@ layout (binding = 2) uniform UBO
     Light lights[LIGHT_COUNT];
 } ubo;
 
-layout (binding = 3, rgba32f) uniform image2D resultImage;
+layout (binding = 4, rgba16f) uniform image2D resultImage;
 
-// Spheremap Transform
-vec3 DecodeNormal(uvec2 enc)
+// Stereographic Projection
+vec3 DecodeNormal (uvec2 enc)
 {
     vec2 enc_n = vec2(enc.xy) / 65535.0f;
     enc_n = enc_n * 2.0f - vec2(1.0f);
 
-    vec4 nn = enc_n.xyxx * vec4(2,2,0,0) + vec4(-1,-1, 1,-1);
-    float l = abs(dot(nn.xyz,-nn.xyw));
-    nn.z = l;
-    nn.xy *= sqrt(l);
-    return nn.xyz * 2 + vec3(0,0,-1);
+    float scale = 1.7777f;
+    vec3 nn = enc_n.xyy * vec3(2.0f*scale, 2.0f * scale, 0.0f) + vec3(-scale,-scale,1);
+    float g = 2.0f / dot(nn.xyz,nn.xyz);
+    vec3 n;
+    n.xy = g*nn.xy;
+    n.z = g-1;
+
+    return n;
 }
 
 // Decode depth z/w - 24 bits, mesh id - 8 bits
@@ -69,8 +73,7 @@ float C(vec3 x1, vec3 x2, float sigma)
 
 void main() 
 {
-    const vec4 colorSample =  imageLoad(giImage, ivec2(gl_GlobalInvocationID.xy));    
-    const vec3 color =  colorSample.xyz / max(colorSample.w, 1.0f);
+    const vec4 sampleValue =  imageLoad(image, ivec2(gl_GlobalInvocationID.xy));
 
     ivec2 bufferSize = textureSize(samplerData0, 0);
 
@@ -83,7 +86,9 @@ void main()
     const vec3 vPos     = ReconstructVSPositionFromDepth(uv, depthAndMeshID.x);
     const float meshID  = depthAndMeshID.y;
 
-    vec3 filteredColor = vec3(0.f);
+    vec3    filteredGI = vec3(0.f);
+    float   filteredAO = 0.f;
+
     float weightSum = 0.f;
 
     const int radius = 3;
@@ -100,27 +105,31 @@ void main()
                     const uvec4 encodedData = texture(samplerData0, currentUV);
                     const vec2 depthAndMeshID = DecodeDepthAndMeshID(encodedData.zw);
 
-                    const vec4 colorSample = imageLoad(giImage, currentInvocationID);
+                    const vec4 sampleValue = imageLoad(image, currentInvocationID);
+                    const uvec2 numSamples = imageLoad(sampleCount, ivec2(gl_GlobalInvocationID.xy)).xy;
 
-                    const vec3 c    = colorSample.xyz / max(colorSample.w, 1.0f);
+                    const float ao =  sampleValue.w / max(numSamples.x, 1.0f);
+                    const vec3  gi =  sampleValue.xyz / max(numSamples.y, 1.0f);
+
                     const vec3 p    = ReconstructVSPositionFromDepth(currentUV, depthAndMeshID.x);
                     const vec3 n    = normalize(DecodeNormal(encodedData.xy));
 
-                    if (meshID == depthAndMeshID.y && length(p) > 0 && isnan(c) == bvec3(false))
+                    if (meshID == depthAndMeshID.y && length(p) > 0 && isnan(gi) == bvec3(false))
                     {                       
-                        const float position_weight      = C(p, vPos, 0.1f);
+                        const float position_weight     = C(p, vPos, 0.1f);
                         const float normal_weight       = pow(max(0.f, dot(vNormal, n)), 128.f);
 
                         float weight = normal_weight * position_weight;
 
-                        filteredColor += weight * c;
+                        filteredGI += weight * gi;
+                        filteredAO += weight * ao;
+
                         weightSum += weight;
                     }
                 }
             }
     }
 
-    vec3 result = weightSum > 0.f ? filteredColor / weightSum : color;
-    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), vec4(result, 1.0f));
-    //imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), colorSample);
+    vec4 result = weightSum > 0.f ? vec4(filteredGI, filteredAO)  / weightSum : sampleValue;
+    imageStore(resultImage, ivec2(gl_GlobalInvocationID.xy), result);
 }

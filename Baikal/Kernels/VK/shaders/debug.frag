@@ -3,7 +3,10 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout (binding = 1) uniform usampler2D buffer0;
+#define PI 3.1415926535897932384626433832795
+
+//layout (binding = 1) uniform usampler2D buffer0;
+layout (binding = 1) uniform samplerCube buffer0;
 layout (binding = 2) uniform sampler2D buffer1;
 layout (binding = 3) uniform sampler2D buffer2;
 layout (location = 0) in vec2 inUV;
@@ -11,17 +14,20 @@ layout (location = 1) in float instanceIdx;
 
 layout (location = 0) out vec4 outFragColor;
 
-// Spheremap Transform
-vec3 DecodeNormal(uvec2 enc)
+// Stereographic Projection
+vec3 DecodeNormal (uvec2 enc)
 {
     vec2 enc_n = vec2(enc.xy) / 65535.0f;
     enc_n = enc_n * 2.0f - vec2(1.0f);
 
-    vec4 nn = enc_n.xyxx * vec4(2,2,0,0) + vec4(-1,-1, 1,-1);
-    float l = abs(dot(nn.xyz,-nn.xyw));
-    nn.z = l;
-    nn.xy *= sqrt(l);
-    return nn.xyz * 2 + vec3(0,0,-1);
+    float scale = 1.7777f;
+    vec3 nn = enc_n.xyy * vec3(2.0f*scale, 2.0f * scale, 0.0f) + vec3(-scale,-scale,1);
+    float g = 2.0f / dot(nn.xyz,nn.xyz);
+    vec3 n;
+    n.xy = g*nn.xy;
+    n.z = g-1;
+
+    return n;
 }
 
 void main() 
@@ -30,19 +36,22 @@ void main()
 
   if (instanceIdx == 0) 
   {
-    uvec4 data = texture(buffer0, inUV);
-    
-    color.xyz = DecodeNormal(data.xy);   
+    float theta = 2.0f * PI * inUV.x;
+    float phi = PI * inUV.y;
+
+    vec3 n = vec3(cos(theta) * sin(phi), sin(theta) * sin(phi), cos(phi));
+    n = normalize(n);
+
+    color.xyz = texture(buffer0, n).xyz;
   }
   else if (instanceIdx == 1) 
   {  
-    color = texture(buffer1, inUV);
-    color.xyz = (color.xyz / color.w) * 10.0f;
+    color.xyz = pow(texture(buffer1, inUV).xyz, vec3(1.0 / 2.2));
+    color.w = 1.0;
   }
   else if (instanceIdx == 2) 
   {
-    color = texture(buffer2, inUV);
-    color.xyz = (color.xyz / color.w);
+    color = texture(buffer2, inUV).wwww;
   }
 
   outFragColor = color;

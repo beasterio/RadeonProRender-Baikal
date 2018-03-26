@@ -30,10 +30,30 @@ THE SOFTWARE.
 #include "bvh.h"
 #include "bvh_encoder.h"
 
+#include <map>
+
 namespace RadeonRays {
+
+    // 
+    using RayBuffers = std::tuple<VkDescriptorBufferInfo,
+        VkDescriptorBufferInfo,
+        VkDescriptorBufferInfo>;
+
+    struct CmpRayBuffers
+    {
+        bool operator()(RayBuffers const& lhs, RayBuffers const& rhs) const
+        {
+            return std::get<0>(lhs).buffer == std::get<0>(rhs).buffer ?
+                (std::get<1>(lhs).buffer == std::get<1>(rhs).buffer ?
+                    std::get<2>(lhs).buffer < std::get<2>(rhs).buffer :
+                    std::get<1>(lhs).buffer < std::get<1>(rhs).buffer) :
+                std::get<0>(lhs).buffer < std::get<0>(rhs).buffer;
+        }
+    };
+
     template <typename BVH, typename BVHTraits> 
     class IntersectorLDS : public Intersector {
-        static std::uint32_t constexpr kNumBindings = 4u;
+        static std::uint32_t constexpr kNumBindings = 5u;
         static std::uint32_t constexpr kWorgGroupSize = 64u;
 
     public:
@@ -47,9 +67,14 @@ namespace RadeonRays {
 
         ~IntersectorLDS() override;
 
-        void BindBuffers(vk::Buffer rays, vk::Buffer hits, std::uint32_t num_rays) override;
         vk::CommandBuffer Commit(World const& world) override;
-        vk::CommandBuffer TraceRays(std::uint32_t num_rays) override;
+        void BindBuffers(VkDescriptorBufferInfo rays,
+                         VkDescriptorBufferInfo hits,
+                         VkDescriptorBufferInfo ray_count) override;
+        void TraceRays(std::uint32_t max_rays,
+                       VkCommandBuffer& command_buffer) override;
+
+        void SetPerformanceQueryInfo(VkQueryPool query_pool, uint32_t begin_query, uint32_t end_query) override;
 
         IntersectorLDS(IntersectorLDS const&) = delete;
         IntersectorLDS& operator = (IntersectorLDS const&) = delete;
@@ -109,11 +134,21 @@ namespace RadeonRays {
         // Intersector compute pipeline
         vk::Pipeline pipeline_;
         // Descriptors layout
-        vk::DescriptorSetLayout desc_layout_;
+        vk::DescriptorSetLayout desc_layout_user_;
+        vk::DescriptorSetLayout desc_layout_lib_;
         // Shader module
         vk::ShaderModule shader_;
         // Descriptor sets
-        std::vector<vk::DescriptorSet> descsets_;
+        std::vector<vk::DescriptorSet> desc_sets_;
+
+
+        std::map<RayBuffers, std::vector<vk::DescriptorSet>, CmpRayBuffers> desc_map_;
+        RayBuffers ray_buffers_;
+
+        // Performance query info
+        uint32_t    begin_query_idx_;
+        uint32_t    end_query_idx_;
+        VkQueryPool query_pool_;
 
         // Device local stack buffer
         VkMemoryAlloc::StorageBlock stack_;
@@ -133,37 +168,51 @@ namespace RadeonRays {
         , cmdpool_(cmdpool)
         , descpool_(descpool)
         , pipeline_cache_(pipeline_cache)
-        , alloc_(alloc) {
-        // Create bindings:
-        // (0) Ray buffer 
-        // (1) Hit buffer 
-        // (2) BVH buffer
-        // (3) Stack buffer
-        vk::DescriptorSetLayoutBinding layout_binding[kNumBindings];
-
+        , alloc_(alloc)
+        , begin_query_idx_(-1)
+        , end_query_idx_(-1)
+        , query_pool_(nullptr) {
         // Initialize bindings
-        for (auto i = 0u; i < kNumBindings; ++i) {
-            layout_binding[i]
-                .setBinding(i)
-                .setDescriptorCount(1)
-                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-        }
+        // Rays, hits and ray count
+        vk::DescriptorSetLayoutBinding desc_set_layout_user[] =
+        {
+            vk::DescriptorSetLayoutBinding(0u, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding(1u, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding(2u, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute)
+        };
+
+        // BVH and stack
+        vk::DescriptorSetLayoutBinding desc_set_layout_lib[] =
+        {
+            vk::DescriptorSetLayoutBinding(3u, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding(4u, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute)
+        };
 
         // Create descriptor set layout
         vk::DescriptorSetLayoutCreateInfo desc_layout_create_info;
         desc_layout_create_info
-            .setBindingCount(kNumBindings)
-            .setPBindings(layout_binding);
-        desc_layout_ = device_
+            .setBindingCount(sizeof(desc_set_layout_user) / sizeof(vk::DescriptorSetLayoutBinding))
+            .setPBindings(desc_set_layout_user);
+        desc_layout_user_ = device_
             .createDescriptorSetLayout(desc_layout_create_info);
+        desc_layout_create_info
+            .setBindingCount(sizeof(desc_set_layout_lib) / sizeof(vk::DescriptorSetLayoutBinding))
+            .setPBindings(desc_set_layout_lib);
+        desc_layout_lib_ = device_
+            .createDescriptorSetLayout(desc_layout_create_info);
+
+        vk::DescriptorSetLayout desc_set_layouts[] = 
+        {
+            desc_layout_user_,
+            desc_layout_lib_
+        };
 
         // Allocate descriptors
         vk::DescriptorSetAllocateInfo desc_alloc_info;
         desc_alloc_info.setDescriptorPool(descpool_);
         desc_alloc_info.setDescriptorSetCount(1);
-        desc_alloc_info.setPSetLayouts(&desc_layout_);
-        descsets_ = device_.allocateDescriptorSets(desc_alloc_info);
+        desc_alloc_info.setPSetLayouts(&desc_set_layouts[1]);
+        desc_sets_ = device_.allocateDescriptorSets(desc_alloc_info);
 
         // Ray count is a push constant, so create a range for it
         vk::PushConstantRange push_constant_range;
@@ -174,15 +223,15 @@ namespace RadeonRays {
         // Create pipeline layout
         vk::PipelineLayoutCreateInfo pipeline_layout_create_info;
         pipeline_layout_create_info
-            .setSetLayoutCount(1)
-            .setPSetLayouts(&desc_layout_)
+            .setSetLayoutCount(sizeof(desc_set_layouts) / sizeof(vk::DescriptorSetLayout))
+            .setPSetLayouts(desc_set_layouts)
             .setPushConstantRangeCount(1)
             .setPPushConstantRanges(&push_constant_range);
         pipeline_layout_ = device_
             .createPipelineLayout(pipeline_layout_create_info);
 
         // Load intersection shader module
-        std::string path = "../3rdparty/radeonrays-next/shaders/";
+        std::string path = "../external/radeonrays-next/shaders/";
         path.append(BVHTraits::GetGPUTraversalFileName());
         shader_ = LoadShaderModule(device_, path);
 
@@ -216,8 +265,54 @@ namespace RadeonRays {
         alloc_.deallocate(bvh_staging_);
         device_.destroyPipelineLayout(pipeline_layout_);
         device_.destroyPipeline(pipeline_);
-        device_.destroyDescriptorSetLayout(desc_layout_);
+        device_.destroyDescriptorSetLayout(desc_layout_user_);
+        device_.destroyDescriptorSetLayout(desc_layout_lib_);
         device_.destroyShaderModule(shader_);
+    }
+    template <typename BVH, typename BVHTraits>
+    inline
+    void  IntersectorLDS<BVH, BVHTraits>::BindBuffers(VkDescriptorBufferInfo rays,
+                                                      VkDescriptorBufferInfo hits,
+                                                      VkDescriptorBufferInfo ray_count)
+    {
+        auto ray_buffers = std::make_tuple(rays, hits, ray_count);
+
+        ray_buffers_ = ray_buffers;
+
+        auto ray_buffers_desc_iter = desc_map_.find(ray_buffers_);
+
+        if (ray_buffers_desc_iter == desc_map_.cend())
+        {
+            vk::DescriptorSetLayout desc_set_layouts[] =
+            {
+                desc_layout_user_
+            };
+
+            // Allocate descriptors
+            vk::DescriptorSetAllocateInfo desc_alloc_info;
+            desc_alloc_info.setDescriptorPool(descpool_);
+            desc_alloc_info.setDescriptorSetCount(sizeof(desc_set_layouts) / sizeof(vk::DescriptorSetLayout));
+            desc_alloc_info.setPSetLayouts(desc_set_layouts);
+            auto desc_sets = device_.allocateDescriptorSets(desc_alloc_info);
+
+            vk::DescriptorBufferInfo desc_buffer_info[] =
+            {
+                rays, hits, ray_count
+            };
+
+            // Update in-lib descriptor sets
+            vk::WriteDescriptorSet desc_writes;
+            desc_writes
+                .setDescriptorCount(sizeof(desc_buffer_info) / sizeof(vk::DescriptorBufferInfo))
+                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+                .setDstSet(desc_sets[0])
+                .setDstBinding(0)
+                .setPBufferInfo(desc_buffer_info);
+
+            device_.updateDescriptorSets(desc_writes, nullptr);
+
+            desc_map_[ray_buffers_] = std::move(desc_sets);
+        }
     }
 
     template <typename BVH, typename BVHTraits>
@@ -255,6 +350,23 @@ namespace RadeonRays {
         // Flush range
         device_.flushMappedMemoryRanges(mapped_range);
         device_.unmapMemory(bvh_staging_.memory);
+
+        vk::DescriptorBufferInfo desc_buffer_info[] =
+        {
+            vk::DescriptorBufferInfo(bvh_local_.buffer, 0u, bvh_local_.size),
+            vk::DescriptorBufferInfo(stack_.buffer, 0u, stack_.size)
+        };
+
+        // Update in-lib descriptor sets
+        vk::WriteDescriptorSet desc_writes;
+        desc_writes
+            .setDescriptorCount(sizeof(desc_buffer_info) / sizeof(vk::DescriptorBufferInfo))
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDstSet(desc_sets_[0])
+            .setDstBinding(3)
+            .setPBufferInfo(desc_buffer_info);
+
+        device_.updateDescriptorSets(desc_writes, nullptr);
 
         // Allocate command buffer
         vk::CommandBufferAllocateInfo cmdbuffer_alloc_info;
@@ -304,57 +416,15 @@ namespace RadeonRays {
 
     template <typename BVH, typename BVHTraits>
     inline
-    void IntersectorLDS<BVH, BVHTraits>::BindBuffers(
-        vk::Buffer rays,
-        vk::Buffer hits,
-        std::uint32_t num_rays) {
-
+    void IntersectorLDS<BVH, BVHTraits>::TraceRays(std::uint32_t max_rays,
+                                                   VkCommandBuffer& command_buffer)
+    {
         // Check if we have enough stack memory
-        auto stack_size_in_bytes = 
-            num_rays * kGlobalStackSize * sizeof(std::uint32_t);
+        auto stack_size_in_bytes =
+            max_rays * kGlobalStackSize * sizeof(std::uint32_t);
         CheckAndReallocStackBuffer(stack_size_in_bytes);
 
-        vk::DescriptorBufferInfo desc_buffer_info[kNumBindings];
-        desc_buffer_info[0]
-            .setBuffer(rays)
-            .setOffset(0)
-            .setRange(num_rays * sizeof(Ray));
-        desc_buffer_info[1]
-            .setBuffer(hits)
-            .setOffset(0)
-            .setRange(num_rays * sizeof(Hit));
-        desc_buffer_info[2]
-            .setBuffer(bvh_local_.buffer)
-            .setOffset(0)
-            // TODO: should be exact bvh_size_in_bytes here,
-            // but we do not keep it around.
-            .setRange(bvh_local_.size);
-        desc_buffer_info[3]
-            .setBuffer(stack_.buffer)
-            .setOffset(0)
-            .setRange(stack_.size);
-
-        vk::WriteDescriptorSet desc_writes;
-        desc_writes
-            .setDescriptorCount(kNumBindings)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setDstSet(descsets_[0])
-            .setDstBinding(0)
-            .setPBufferInfo(&desc_buffer_info[0]);
-
-        device_.updateDescriptorSets(desc_writes, nullptr);
-    }
-
-    template <typename BVH, typename BVHTraits>
-    inline
-    vk::CommandBuffer IntersectorLDS<BVH, BVHTraits>::TraceRays(std::uint32_t num_rays) {
-        // Allocate command buffer
-        vk::CommandBufferAllocateInfo cmdbuffer_alloc_info;
-        cmdbuffer_alloc_info
-            .setCommandBufferCount(1)
-            .setCommandPool(cmdpool_)
-            .setLevel(vk::CommandBufferLevel::ePrimary);
-        auto cmdbuffers = device_.allocateCommandBuffers(cmdbuffer_alloc_info);
+        vk::CommandBuffer cmdbuffers[1] = { command_buffer };
 
         // Begin command buffer recording
         vk::CommandBufferBeginInfo cmdbuffer_begin_info;
@@ -365,16 +435,19 @@ namespace RadeonRays {
             vk::PipelineBindPoint::eCompute,
             pipeline_);
 
+        auto desc_set = desc_map_[ray_buffers_];
+        desc_set.insert(desc_set.end(), desc_sets_.begin(), desc_sets_.end());
+
         // Bind descriptor sets
         cmdbuffers[0].bindDescriptorSets(
             vk::PipelineBindPoint::eCompute,
             pipeline_layout_,
             0,
-            descsets_,
+            desc_set,
             nullptr);
 
         // Push constants
-        auto N = static_cast<std::uint32_t>(num_rays);
+        auto N = static_cast<std::uint32_t>(max_rays);
         cmdbuffers[0].pushConstants(
             pipeline_layout_,
             vk::ShaderStageFlagBits::eCompute,
@@ -382,13 +455,30 @@ namespace RadeonRays {
             sizeof(std::uint32_t),
             &N);
 
+        if (begin_query_idx_ != -1 && end_query_idx_ != -1 && query_pool_ != nullptr)
+        {
+            cmdbuffers[0].resetQueryPool(query_pool_, begin_query_idx_, 1);
+            cmdbuffers[0].writeTimestamp(vk::PipelineStageFlagBits::eAllCommands, query_pool_, begin_query_idx_);
+        }
+
         // Dispatch intersection shader
-        auto num_groups = (num_rays + kWorgGroupSize - 1) / kWorgGroupSize;
+        auto num_groups = (max_rays + kWorgGroupSize - 1) / kWorgGroupSize;
         cmdbuffers[0].dispatch(num_groups, 1, 1);
+
+        if (begin_query_idx_ != -1 && end_query_idx_ != -1 && query_pool_ != nullptr)
+        {
+            cmdbuffers[0].resetQueryPool(query_pool_, end_query_idx_, 1);
+            cmdbuffers[0].writeTimestamp(vk::PipelineStageFlagBits::eAllCommands, query_pool_, end_query_idx_);
+        }
 
         // End command buffer
         cmdbuffers[0].end();
+    }
 
-        return cmdbuffers[0];
+    template <typename BVH, typename BVHTraits>
+    inline void IntersectorLDS<BVH, BVHTraits>::SetPerformanceQueryInfo(VkQueryPool query_pool, uint32_t begin_query_idx, uint32_t end_query_idx) {
+        begin_query_idx_ = begin_query_idx;
+        end_query_idx_ = end_query_idx;
+        query_pool_ = query_pool;
     }
 }
