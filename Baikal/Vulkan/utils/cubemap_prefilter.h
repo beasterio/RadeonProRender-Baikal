@@ -285,8 +285,8 @@ public:
         PipelineList& pipeline_list = _resources->GetPipepineList();
 
         std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-            shader_list.Load("shaders/filtercube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            shader_list.Load("shaders/irradiancecube.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+            shader_list.Load("../Baikal/Kernels/VK/shaders/filtercube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            shader_list.Load("../Baikal/Kernels/VK/shaders/irradiancecube.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
         VkGraphicsPipelineCreateInfo pipelineCI = vks::initializers::pipelineCreateInfo(pipelinelayout, renderpass);
         pipelineCI.pInputAssemblyState = &inputAssemblyState;
@@ -514,7 +514,7 @@ public:
         if (!pipeline_list.Present(_gen_sh9_project)) {
             VkPipelineLayout pipeline_layout = pipelinelayout_list.Get(_gen_sh9_project);
 
-            VkPipelineShaderStageCreateInfo shader_stage = shader_list.Load("shaders/cubemap_sh9_project.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+            VkPipelineShaderStageCreateInfo shader_stage = shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_sh9_project.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
 
             VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(pipeline_layout, 0);
             computePipelineCreateInfo.stage = shader_stage;
@@ -576,7 +576,7 @@ public:
         if (!pipeline_list.Present(_gen_sh9_downsample)) {
             VkPipelineLayout pipeline_layout = pipelinelayout_list.Get(_gen_sh9_downsample);
 
-            VkPipelineShaderStageCreateInfo shader_stage = shader_list.Load("shaders/cubemap_sh9_downsample.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+            VkPipelineShaderStageCreateInfo shader_stage = shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_sh9_downsample.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
 
             VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(pipeline_layout, 0);
             computePipelineCreateInfo.stage = shader_stage;
@@ -590,7 +590,7 @@ public:
         if (!pipeline_list.Present(_gen_sh9_final)) {
             VkPipelineLayout pipeline_layout = pipelinelayout_list.Get(_gen_sh9_downsample);
 
-            VkPipelineShaderStageCreateInfo shader_stage = shader_list.Load("shaders/cubemap_sh9_final.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
+            VkPipelineShaderStageCreateInfo shader_stage = shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_sh9_final.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
 
             VkComputePipelineCreateInfo computePipelineCreateInfo = vks::initializers::computePipelineCreateInfo(pipeline_layout, 0);
             computePipelineCreateInfo.stage = shader_stage;
@@ -1017,8 +1017,8 @@ public:
         ShaderList& shader_list = _resources->GetShaderList();
 
         std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-            shader_list.Load("shaders/filtercube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            shader_list.Load("shaders/prefilterenvmap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+            shader_list.Load("../Baikal/Kernels/VK/shaders/filtercube.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            shader_list.Load("../Baikal/Kernels/VK/shaders/prefilterenvmap.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
         VkGraphicsPipelineCreateInfo pipeline_create_info = vks::initializers::pipelineCreateInfo(pipelinelayout, renderpass);
         pipeline_create_info.pInputAssemblyState = &inputAssemblyState;
@@ -1309,8 +1309,8 @@ public:
 
         // Look-up-table (from BRDF) pipeline
         std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-            shader_list.Load("shaders/genbrdflut.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            shader_list.Load("shaders/genbrdflut.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+            shader_list.Load("../Baikal/Kernels/VK/shaders/genbrdflut.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            shader_list.Load("../Baikal/Kernels/VK/shaders/genbrdflut.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
         VkGraphicsPipelineCreateInfo pipeline_create_info = vks::initializers::pipelineCreateInfo(pipelinelayout, renderpass);
         pipeline_create_info.pInputAssemblyState = &inputAssemblyState;

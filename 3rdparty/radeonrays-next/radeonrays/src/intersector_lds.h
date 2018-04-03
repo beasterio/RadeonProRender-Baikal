@@ -229,9 +229,10 @@ namespace RadeonRays {
             .setPPushConstantRanges(&push_constant_range);
         pipeline_layout_ = device_
             .createPipelineLayout(pipeline_layout_create_info);
-
+        
         // Load intersection shader module
-        std::string path = "../external/radeonrays-next/shaders/";
+        //std::string path = "../external/radeonrays-next/shaders/";
+        std::string path = "../3rdparty/radeonrays-next/shaders/";
         path.append(BVHTraits::GetGPUTraversalFileName());
         shader_ = LoadShaderModule(device_, path);
 

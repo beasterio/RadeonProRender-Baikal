@@ -73,7 +73,7 @@ public:
         VkSubmitInfo submit_info = {};
 
         submit_info.pWaitDstStageMask = &_stage_wait_flags[0];
-        submit_info.pWaitSemaphores = &_dependencies[0];
+        submit_info.pWaitSemaphores = _dependencies.empty() ? VK_NULL_HANDLE : &_dependencies[0];
         submit_info.waitSemaphoreCount = _dependencies.size();
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pSignalSemaphores = &_signal_finished;
@@ -155,8 +155,8 @@ private:
 
         if (!pipeline_list.Present(_pass_name_hash)) {
             std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-                shader_list.Load("shaders/mrt.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/mrt.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/mrt.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/mrt.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state  = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);

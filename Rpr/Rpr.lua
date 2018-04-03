@@ -19,7 +19,7 @@ project "RadeonProRender"
                     "../3rdparty/radeonrays-next/radeonrays/inc",
                     "../3rdparty/glm",
                     "../3rdparty/gli",
-                    "../3rdparty/assimp",
+                    "../3rdparty/assimp/include",
                     "." }
 
     defines {"RPR_EXPORT_API"}
@@ -38,11 +38,12 @@ project "RadeonProRender"
         linkoptions { '/DEF:"RadeonProRender.def"' }
 
         links {"RadeonRays",}
-        links {"glew32s", "OpenGL32"}
+        links {"glew32s", "OpenGL32", "assimp"}
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
+                    "../3rdparty/assimp/lib/",
                     "../3rdparty/vulkan/lib/",}
 
         configuration {"Debug"}

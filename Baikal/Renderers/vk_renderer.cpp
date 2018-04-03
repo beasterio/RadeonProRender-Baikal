@@ -42,24 +42,13 @@ namespace
 {
     bool aoEnabled = true;
     bool giEnabled = true;
-
-    const std::string GetAssetPath()
-    {
-#if defined(VK_USE_PLATFORM_ANDROID_KHR)
-        return "";
-#elif defined(VK_EXAMPLE_DATA_DIR)
-        return VK_EXAMPLE_DATA_DIR;
-#else
-        return "../Baikal/Kernels/VK/";
-#endif
-    }
 }
 
 namespace Baikal
 {
     using namespace RadeonRays;
     
-    VkRenderer::VkRenderer(vks::VulkanDevice* device, rr_instance* instance)
+    VkRenderer::VkRenderer(vks::VulkanDevice* device, rr_instance* instance, ResourceManager* resources)
         : m_vulkan_device(device)
         , m_view_updated(true)
         , m_output_changed(true)
@@ -68,6 +57,7 @@ namespace Baikal
         , m_profiler(nullptr)
         , m_rr_instance(instance)
         , m_frame_counter(0)
+        , m_resources(resources)
     {
         PrepareUniformBuffers();
         m_profiler = new GPUProfiler(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, 128);
@@ -77,12 +67,23 @@ namespace Baikal
         PrepareQuadBuffers();
         SetupDescriptorSetLayout();
         SetupVertexDescriptions();
+
+        rteInitInstance(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, m_vulkan_device->computeCommandPool, *m_rr_instance, RTE_EFFECT_AO, &m_rte_instance);
+
+        VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
+
+        VK_CHECK_RESULT(vkCreateSemaphore(m_vulkan_device->logicalDevice, &semaphoreCreateInfo, nullptr, &m_semaphores.ao_complete));
+        VK_CHECK_RESULT(vkCreateSemaphore(m_vulkan_device->logicalDevice, &semaphoreCreateInfo, nullptr, &m_semaphores.gi_complete));
+        VK_CHECK_RESULT(vkCreateSemaphore(m_vulkan_device->logicalDevice, &semaphoreCreateInfo, nullptr, &m_semaphores.bilateral_filter_complete));
+        VK_CHECK_RESULT(vkCreateSemaphore(m_vulkan_device->logicalDevice, &semaphoreCreateInfo, nullptr, &m_semaphores.transfer_complete));
     }
 
     VkRenderer::~VkRenderer()
     {
         delete m_profiler;
         m_profiler = nullptr;
+
+        rteShutdownInstance(m_rte_instance);
     }
 
     // Renderer overrides
@@ -101,9 +102,12 @@ namespace Baikal
                                         scene.dirty_flags & VkScene::LIGHTS;
         bool scene_changed = scene.dirty_flags & VkScene::CURRENT_SCENE ||
                                 scene.dirty_flags & VkScene::SCENE_ATTRIBUTES;
-        bool textures_changed = scene.dirty_flags & VkScene::TEXTURES;
+        bool textures_changed = scene.dirty_flags & VkScene::TEXTURES || !m_shadow_pass;
 
         m_view_updated |= m_output_changed;
+
+
+
         if (shapes_changed || m_output_changed)
         {
             PrepareRayBuffers();
@@ -122,10 +126,80 @@ namespace Baikal
             PreparePipelines(&scene);
         }
 
-        BuildCommandBuffers();
+        if (!m_shadow_pass)
+        {
+            BuildDrawCommandBuffers();
+
+            auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
+            int width = vk_output->width();
+            int height = vk_output->height();
+            auto device = m_vulkan_device->logicalDevice;
+            VkQueue queue;
+            vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
+
+            TextureList& texture_list = m_resources->GetTextures();
+            texture_list.addCubemap(STATIC_CRC32("EnvMap"), "../Resources/Textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT);
+            m_irradiance_grid = new IrradianceGrid("../Resources/", m_vulkan_device, queue, scene);
+
+            // $tmp
+            //m_cubemap_render = new CubemapRender(m_vulkan_device, queue, scene);
+            //m_cubemap_prefilter = new CubemapPrefilter(GetAssetPath().c_str(), m_vulkan_device, queue, m_resources);
+
+            //m_cubemap = m_cubemap_render->CreateCubemap(m_cubemap_render->_cubemap_face_size, VK_FORMAT_R16G16B16A16_SFLOAT);
+            m_shadow_pass = new ShadowRenderPass(m_vulkan_device, m_resources);
+            m_gbuffer_pass = new GBufferRenderPass(m_vulkan_device, scene, width, height);
+            m_deferred_pass = new DeferredRenderPass(m_vulkan_device,
+                *m_gbuffer_pass,
+                *m_shadow_pass,
+                *m_irradiance_grid,
+                vk_output->framebuffers.draw_render_pass,
+                textures.filteredTraceResults.descriptor,
+                /*m_semaphores.render_complete*/ VK_NULL_HANDLE,
+                m_resources);
+
+            std::vector<VkSemaphore> dependencies = {};
+            std::vector<VkPipelineStageFlags> waitStageBits = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+            m_gbuffer_pass->SetDependencies(dependencies, waitStageBits);
+
+            m_shadow_pass->BuildCommandBuffer(scene);
+
+            DeferredRenderPass::BuildCommandBufferInfo deferred_pass_build_info = {
+                *m_gbuffer_pass
+                , vk_output->framebuffers.draw_render_pass
+                , vk_output->framebuffers.draw_fb
+                , m_command_buffers.drawCmdBuffers
+                , aoEnabled
+                , giEnabled
+                , false
+            };
+            m_deferred_pass->BuildCommandBuffer(deferred_pass_build_info);
+            m_irradiance_grid->Update();
+
+            InitRte(&scene);
+
+            vks::Framebuffer* g_buffer = m_gbuffer_pass->GetFrameBuffer();
+            VkDescriptorImageInfo g_buffer_attachments[3] = {
+                vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+                vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[1].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+                vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[2].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) };
+
+            std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+            writeDescriptorSets =
+            {
+                // Binding 2 : Depth buffer, normals and mesh id
+                vks::initializers::writeDescriptorSet(
+                    m_descriptor_sets.bilateralFilter,
+                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    2,
+                    &g_buffer_attachments[0]),
+            };
+
+            vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+        }
+
         if (shapes_changed || scene_changed || m_output_changed || textures_changed)
         {
-            //BuildDrawCommandBuffers();
+            BuildCommandBuffers();
         }
 
         if (shapes_changed || m_output_changed || textures_changed)
@@ -136,6 +210,8 @@ namespace Baikal
         {
             UpdateUniformBuffers(&scene);
         }
+
+
 
         scene.dirty_flags = VkScene::NONE;
         m_output_changed = false;
@@ -227,7 +303,7 @@ namespace Baikal
             submitInfo.waitSemaphoreCount = 1;
             stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
             submitInfo.pWaitDstStageMask = &stageFlags;
-            submitInfo.pSignalSemaphores = &m_gi_complete;
+            submitInfo.pSignalSemaphores = &m_semaphores.gi_complete;
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.commandBufferCount = 9;
             submitInfo.pCommandBuffers = &m_command_buffers.gi[0];
@@ -244,7 +320,7 @@ namespace Baikal
                 submitInfo.waitSemaphoreCount = giEnabled ? 0 : 1;
                 stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
                 submitInfo.pWaitDstStageMask = &stageFlags;
-                submitInfo.pSignalSemaphores = &m_ao_complete;
+                submitInfo.pSignalSemaphores = &m_semaphores.ao_complete;
                 submitInfo.signalSemaphoreCount = 1;
                 submitInfo.commandBufferCount = 3;
                 submitInfo.pCommandBuffers = &m_command_buffers.ao[0];
@@ -258,8 +334,8 @@ namespace Baikal
             static std::vector<VkSemaphore> waitSemaphores;
 
             waitSemaphores.clear();
-            if (aoEnabled) waitSemaphores.push_back(m_ao_complete);
-            if (giEnabled) waitSemaphores.push_back(m_gi_complete);
+            if (aoEnabled) waitSemaphores.push_back(m_semaphores.ao_complete);
+            if (giEnabled) waitSemaphores.push_back(m_semaphores.gi_complete);
 
             submitInfo.pWaitSemaphores = &waitSemaphores[0];
             submitInfo.waitSemaphoreCount = waitSemaphores.size();
@@ -270,7 +346,7 @@ namespace Baikal
             };
 
             submitInfo.pWaitDstStageMask = &stageFlags[0];
-            submitInfo.pSignalSemaphores = &m_bilateral_filter_complete;
+            submitInfo.pSignalSemaphores = &m_semaphores.bilateral_filter_complete;
             submitInfo.signalSemaphoreCount = 1;
             submitInfo.pCommandBuffers = &m_command_buffers.bilateralFilter;
             submitInfo.commandBufferCount = 1;
@@ -281,7 +357,7 @@ namespace Baikal
             std::vector<VkSemaphore> waitSemaphores = { m_shadow_pass->GetSyncPrimitive() };
             std::vector<VkPipelineStageFlags> stageFlags = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT };
 
-            if (aoEnabled || giEnabled) waitSemaphores.push_back(m_bilateral_filter_complete);
+            if (aoEnabled || giEnabled) waitSemaphores.push_back(m_semaphores.bilateral_filter_complete);
 
             m_deferred_pass->SetDependencies(waitSemaphores, stageFlags);
             m_deferred_pass->Execute(graphics_queue, m_command_buffers.drawCmdBuffers);
@@ -961,6 +1037,14 @@ namespace Baikal
         int width = framebuffers.deferred->width;
         int height = framebuffers.deferred->height;
 
+        textures.filteredTraceResults.destroy();
+        textures.sampleCounters.destroy();
+        textures.traceResults.destroy();
+
+        PrepareTextureTarget(&textures.sampleCounters, width, height, VK_FORMAT_R16G16_UINT);
+        PrepareTextureTarget(&textures.traceResults, width, height, VK_FORMAT_R16G16B16A16_SFLOAT);
+        PrepareTextureTarget(&textures.filteredTraceResults, width, height, VK_FORMAT_R16G16B16A16_SFLOAT);
+
         std::vector<VkWriteDescriptorSet> writeDescriptorSets;
 
         // Bilateral filter descriptor set
@@ -1087,10 +1171,24 @@ namespace Baikal
             &m_uniform_buffers.fsLights,
             sizeof(uboFragmentLights)));
 
+        // Deferred vertex shader
+        VK_CHECK_RESULT(vulkanDevice->createBuffer(
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            &m_uniform_buffers.vsSceneToCube,
+            sizeof(VkScene::CubeViewInfo)));
+
         // Map persistent
         VK_CHECK_RESULT(m_uniform_buffers.vsFullScreen.map());
         VK_CHECK_RESULT(m_uniform_buffers.vsOffscreen.map());
         VK_CHECK_RESULT(m_uniform_buffers.fsLights.map());
+        VK_CHECK_RESULT(m_uniform_buffers.vsSceneToCube.map());
+
+        BuffersList& uniformBuffersList = m_resources->GetBuffersList();
+        uniformBuffersList.Set(STATIC_CRC32("Lights"), m_uniform_buffers.fsLights);
+        uniformBuffersList.Set(STATIC_CRC32("FullscreenQuad"), m_uniform_buffers.vsFullScreen);
+        uniformBuffersList.Set(STATIC_CRC32("Scene"), m_uniform_buffers.vsOffscreen);
+        uniformBuffersList.Set(STATIC_CRC32("SceneToCube"), m_uniform_buffers.vsSceneToCube);
     }
     void VkRenderer::UpdateUniformBuffers(VkScene const* scene)
     {
@@ -1553,84 +1651,84 @@ namespace Baikal
         }
     }
 
-    //void VkRenderer::BuildDrawCommandBuffers()
-    //{
-    //    auto& device = m_vulkan_device->logicalDevice;
-    //    auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
-    //    auto const& framebuffers = vk_output->framebuffers;
-    //    int width = vk_output->width();
-    //    int height = vk_output->height();
+    void VkRenderer::BuildDrawCommandBuffers()
+    {
+        auto& device = m_vulkan_device->logicalDevice;
+        auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
+        auto const& framebuffers = vk_output->framebuffers;
+        int width = vk_output->width();
+        int height = vk_output->height();
 
-    //    if (!m_command_buffers.drawCmdBuffers)
-    //    {
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->commandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
+        if (!m_command_buffers.drawCmdBuffers)
+        {
+            VkCommandBufferAllocateInfo cmdBufAllocateInfo =
+                vks::initializers::commandBufferAllocateInfo(
+                    m_vulkan_device->commandPool,
+                    VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                    1);
 
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.drawCmdBuffers));
-    //    }
+            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.drawCmdBuffers));
+        }
 
-    //    VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        //VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
 
-    //    VkClearValue clearValues[2];
-    //    clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-    //    clearValues[1].depthStencil = { 1.0f, 0 };
+        //VkClearValue clearValues[2];
+        //clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
+        //clearValues[1].depthStencil = { 1.0f, 0 };
 
-    //    VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-    //    renderPassBeginInfo.renderPass = framebuffers.draw_render_pass;
-    //    renderPassBeginInfo.renderArea.offset.x = 0;
-    //    renderPassBeginInfo.renderArea.offset.y = 0;
-    //    renderPassBeginInfo.renderArea.extent.width = width;
-    //    renderPassBeginInfo.renderArea.extent.height = height;
-    //    renderPassBeginInfo.clearValueCount = 2;
-    //    renderPassBeginInfo.pClearValues = clearValues;
+        //VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
+        //renderPassBeginInfo.renderPass = framebuffers.draw_render_pass;
+        //renderPassBeginInfo.renderArea.offset.x = 0;
+        //renderPassBeginInfo.renderArea.offset.y = 0;
+        //renderPassBeginInfo.renderArea.extent.width = width;
+        //renderPassBeginInfo.renderArea.extent.height = height;
+        //renderPassBeginInfo.clearValueCount = 2;
+        //renderPassBeginInfo.pClearValues = clearValues;
 
-    //    auto& drawCmdBuffers = m_command_buffers.drawCmdBuffers;
-    //    bool aoEnabled = true;
-    //    bool giEnabled = true;
+        //auto& drawCmdBuffers = m_command_buffers.drawCmdBuffers;
+        //bool aoEnabled = true;
+        //bool giEnabled = true;
 
-    //    {
-    //        // Set target frame buffer
-    //        renderPassBeginInfo.framebuffer = framebuffers.draw_fb;
+        //{
+        //    // Set target frame buffer
+        //    renderPassBeginInfo.framebuffer = framebuffers.draw_fb;
 
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.drawCmdBuffers, &cmdBufInfo));
+        //    VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.drawCmdBuffers, &cmdBufInfo));
 
-    //        vkCmdBeginRenderPass(drawCmdBuffers, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        //    vkCmdBeginRenderPass(drawCmdBuffers, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    //        VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
-    //        vkCmdSetViewport(drawCmdBuffers, 0, 1, &viewport);
+        //    VkViewport viewport = vks::initializers::viewport((float)width, (float)height, 0.0f, 1.0f);
+        //    vkCmdSetViewport(drawCmdBuffers, 0, 1, &viewport);
 
-    //        VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
-    //        vkCmdSetScissor(drawCmdBuffers, 0, 1, &scissor);
+        //    VkRect2D scissor = vks::initializers::rect2D(width, height, 0, 0);
+        //    vkCmdSetScissor(drawCmdBuffers, 0, 1, &scissor);
 
-    //        VkDeviceSize offsets[1] = { 0 };
-    //        vkCmdBindDescriptorSets(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.deferred, 0, NULL);
+        //    VkDeviceSize offsets[1] = { 0 };
+        //    vkCmdBindDescriptorSets(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.deferred, 0, NULL);
 
-    //        int drawMode[] = { giEnabled ? 1 : 0, aoEnabled ? 1 : 0 };
-    //        vkCmdPushConstants(drawCmdBuffers, m_pipeline_layouts.deferred, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 2 * sizeof(int), drawMode);
+        //    int drawMode[] = { giEnabled ? 1 : 0, aoEnabled ? 1 : 0 };
+        //    vkCmdPushConstants(drawCmdBuffers, m_pipeline_layouts.deferred, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 2 * sizeof(int), drawMode);
 
-    //        // Final composition as full screen quad
-    //        vkCmdBindPipeline(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.deferred);
-    //        vkCmdBindVertexBuffers(drawCmdBuffers, VERTEX_BUFFER_BIND_ID, 1, &models.quad.vertices.buffer, offsets);
-    //        vkCmdBindIndexBuffer(drawCmdBuffers, models.quad.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-    //        vkCmdDrawIndexed(drawCmdBuffers, 6, 1, 0, 0, 0);
+        //    // Final composition as full screen quad
+        //    vkCmdBindPipeline(drawCmdBuffers, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.deferred);
+        //    vkCmdBindVertexBuffers(drawCmdBuffers, VERTEX_BUFFER_BIND_ID, 1, &models.quad.vertices.buffer, offsets);
+        //    vkCmdBindIndexBuffer(drawCmdBuffers, models.quad.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+        //    vkCmdDrawIndexed(drawCmdBuffers, 6, 1, 0, 0, 0);
 
-    //        //if (debugViewEnabled)
-    //        //{
-    //        //    vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.debug, 0, NULL);
-    //        //    vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.debug);
-    //        //    vkCmdDrawIndexed(drawCmdBuffers[i], 6, numDebugImages, 0, 0, 0);
-    //        //}
+            //if (debugViewEnabled)
+            //{
+            //    vkCmdBindDescriptorSets(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline_layouts.deferred, 0, 1, &m_descriptor_sets.debug, 0, NULL);
+            //    vkCmdBindPipeline(drawCmdBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.debug);
+            //    vkCmdDrawIndexed(drawCmdBuffers[i], 6, numDebugImages, 0, 0, 0);
+            //}
 
-    //        vkCmdEndRenderPass(drawCmdBuffers);
+            //vkCmdEndRenderPass(drawCmdBuffers);
 
-    //        VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers));
-    //    }
-    //}
+            //VK_CHECK_RESULT(vkEndCommandBuffer(drawCmdBuffers));
+        //}
+    }
 
-    void VkRenderer::InitRte(VkScene* scene)
+    void VkRenderer::InitRte(VkScene const* scene)
     {
         auto device = m_vulkan_device->logicalDevice;
         auto output = GetOutput(Baikal::OutputType::kColor);
@@ -1719,7 +1817,7 @@ namespace Baikal
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &computeQueue);
 
         // Gbuffer rendering
-        VkSubmitInfo submitInfo;
+        VkSubmitInfo submitInfo = vks::initializers::submitInfo();
         submitInfo.pWaitSemaphores = nullptr;
         submitInfo.waitSemaphoreCount = 0;
         VkPipelineStageFlags stageFlags = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;

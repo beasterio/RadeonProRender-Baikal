@@ -11,7 +11,7 @@ project "BaikalStandalone"
                 "../3rdparty/radeonrays-next/radeonrays/inc",
                 "../3rdparty/glm",
                 "../3rdparty/gli",
-                "../3rdparty/assimp",
+                "../3rdparty/assimp/include",
                 "."}
 
     if os.is("macosx") then
@@ -26,12 +26,13 @@ project "BaikalStandalone"
     if os.is("windows") then
         includedirs { "../3rdparty/glew/include", "../3rdparty/freeglut/include",
         "../3rdparty/oiio/include", "../3rdparty/glfw/include"}
-        links {"glew32", "OpenGL32", "glfw3", "vulkan-1"}
+        links {"glew32", "OpenGL32", "glfw3", "vulkan-1", "assimp"}
         libdirs {   "../3rdparty/glew/lib/%{cfg.platform}",
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/glfw/lib/%{cfg.platform}",
+                    "../3rdparty/assimp/lib/",
                     "../3rdparty/vulkan/lib/",
                     }
 

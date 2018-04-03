@@ -28,6 +28,7 @@
 #include "render_factory.h"
 #include "SceneGraph/vkscene.h"
 #include "Vulkan/VulkanDevice.hpp"
+#include "Vulkan/resources/resource_manager.h"
 
 namespace Baikal
 {
@@ -59,6 +60,7 @@ namespace Baikal
     private:
         vks::VulkanDevice* m_device;
         mutable rr_instance m_instance;
+        std::unique_ptr<ResourceManager> m_resources;
         mutable vks::Buffer* m_offscreen_buffer;
     };
 }

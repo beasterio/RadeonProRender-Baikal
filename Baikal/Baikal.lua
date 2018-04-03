@@ -1,7 +1,7 @@
 project "Baikal"
     kind "StaticLib"
     location "../Baikal"
-    links {"CLW", "Calc", "FreeImage"}
+    links {"CLW", "Calc", "FreeImage", "assimp"}
     files { "../Baikal/**.inl", "../Baikal/**.h", "../Baikal/**.cpp", "../Baikal/**.cl", "../Baikal/**.fsh", "../Baikal/**.vsh", "../Baikal/**.hpp",
             "../3rdparty/radeonrays-next/radeonrays/**.h", 
             "../3rdparty/radeonrays-next/radeonrays/**.cpp",
@@ -15,7 +15,7 @@ project "Baikal"
                 "../3rdparty/radeonrays-next/radeonrays/src",
                 "../3rdparty/glm",
                 "../3rdparty/gli",
-                "../3rdparty/assimp",
+                "../3rdparty/assimp/include",
                 "."}
 
     if os.is("macosx") then
@@ -37,6 +37,7 @@ project "Baikal"
                     "../3rdparty/freeglut/lib/%{cfg.platform}",
                     "../3rdparty/embree/lib/%{cfg.platform}",
                     "../3rdparty/oiio/lib/%{cfg.platform}",
+                    "../3rdparty/assimp/lib",
                     "../3rdparty/glfw/lib/%{cfg.platform}" }
 
         defines{"VK_USE_PLATFORM_WIN32_KHR",
@@ -151,6 +152,7 @@ project "Baikal"
           'copy "..\\3rdparty\\RprLoadStore\\bin\\%{cfg.platform}\\RprLoadStore64.dll" "%{cfg.buildtarget.directory}"',
           'copy "..\\3rdparty\\RprSupport\\bin\\%{cfg.platform}\\RprSupport64.dll" "%{cfg.buildtarget.directory}"',
           'copy "..\\3rdparty\\FreeImage\\bin\\FreeImage.dll" "%{cfg.buildtarget.directory}"',
+          'copy "..\\3rdparty\\assimp\\bin\\assimp-vc140-mt.dll" "%{cfg.buildtarget.directory}"',
           -- 'copy "..\\3rdparty\\VulkanEZ\\bin\\VulkanEZ.dll" "%{cfg.buildtarget.directory}"'
         }
     end

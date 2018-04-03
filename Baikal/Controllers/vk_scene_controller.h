@@ -46,7 +46,7 @@ namespace Baikal
     {
     public:
         // Constructor
-        VkSceneController(vks::VulkanDevice* device, rr_instance& instance, vks::Buffer* defaultUBO);
+        VkSceneController(vks::VulkanDevice* device, rr_instance& instance, vks::Buffer* defaultUBO, ResourceManager* resources);
         // Destructor
         virtual ~VkSceneController();
 
@@ -82,7 +82,7 @@ namespace Baikal
         vks::VulkanDevice* m_vulkan_device;
         rr_instance* m_instance;
         vks::Buffer* m_defaultUBO;
-
+        ResourceManager* m_resources;
         mutable std::vector<rr_shape> m_rr_meshes;
     };
 }

@@ -60,7 +60,7 @@ namespace RTE
                     .createPipelineLayout(pipeline_layout_create_info);
 
                 // Load intersection shader module
-                std::string path = "../data/shaders/ao_spawn_rays.comp.spv";
+                std::string path = "../Baikal/Kernels/Vk/shaders/ao_spawn_rays.comp.spv";
                 spawn_rays_.shader_ = RadeonRays::LoadShaderModule(device_, path);
 
                 // Create pipeline 
@@ -115,7 +115,7 @@ namespace RTE
                     .createPipelineLayout(pipeline_layout_create_info);
 
                 // Load intersection shader module
-                std::string path = "../data/shaders/ao_resolve.comp.spv";
+                std::string path = "../Baikal/Kernels/Vk/shaders/ao_resolve.comp.spv";
                 resolve_.shader_ = RadeonRays::LoadShaderModule(device_, path);
 
                 // Create pipeline 

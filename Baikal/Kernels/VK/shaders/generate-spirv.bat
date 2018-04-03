@@ -32,3 +32,9 @@ glslangvalidator -V weight_calc.frag -o weight_calc.frag.spv
 glslangvalidator -V weight_calc.vert -o weight_calc.vert.spv
 glslangvalidator -V mlaa_final_blend.frag -o mlaa_final_blend.frag.spv
 glslangvalidator -V mlaa_final_blend.vert -o mlaa_final_blend.vert.spv
+
+glslangvalidator -V prefilterenvmap.frag -o prefilterenvmap.frag.spv
+glslangvalidator -V genbrdflut.frag -o genbrdflut.frag.spv
+glslangvalidator -V genbrdflut.vert -o genbrdflut.vert.spv
+glslangvalidator -V edge_detection.frag -o edge_detection.frag.spv
+glslangvalidator -V edge_detection.vert -o edge_detection.vert.spv

@@ -84,7 +84,7 @@ namespace RTE
                     .createPipelineLayout(pipeline_layout_create_info);
 
                 // Load intersection shader module
-                std::string path = "../data/shaders/gi_spawn_rays_from_gbuffer_gloss.comp.spv";
+                std::string path = "../Baikal/Kernels/Vk/shaders/gi_spawn_rays_from_gbuffer_gloss.comp.spv";
                 spawn_rays_.shader_ = RadeonRays::LoadShaderModule(device_, path);
 
                 // Create pipeline 
@@ -209,7 +209,7 @@ namespace RTE
                     .createPipelineLayout(pipeline_layout_create_info);
 
                 // Load intersection shader module
-                std::string path = "../data/shaders/gi_sample_lights.comp.spv";
+                std::string path = "../Baikal/Kernels/Vk/shaders/gi_sample_lights.comp.spv";
                 sample_lights_.shader_ = RadeonRays::LoadShaderModule(device_, path);
 
                 // Create pipeline 
@@ -307,7 +307,7 @@ namespace RTE
                     .createPipelineLayout(pipeline_layout_create_info);
 
                 // Load intersection shader module
-                std::string path = "../data/shaders/gi_accumulate_samples.comp.spv";
+                std::string path = "../Baikal/Kernels/Vk/shaders/gi_accumulate_samples.comp.spv";
                 accumulate_contribution_.shader_ = RadeonRays::LoadShaderModule(device_, path);
 
                 // Create pipeline 

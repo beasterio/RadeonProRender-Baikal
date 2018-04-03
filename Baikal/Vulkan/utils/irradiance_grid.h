@@ -28,7 +28,7 @@ public:
         glm::vec3   scene_min;
     };
 public:
-    IrradianceGrid(const char* asset_path, vks::VulkanDevice* device, VkQueue queue, Baikal::VkScene& scene) : _scene(scene), _device(device) {
+    IrradianceGrid(const char* asset_path, vks::VulkanDevice* device, VkQueue queue, Baikal::VkScene const& scene) : _scene(scene), _device(device) {
         const glm::vec3 diff = glm::floor(glm::vec3(_scene.bbox._max) - glm::vec3(_scene.bbox._min));
 
         const float sum = diff.x + diff.y + diff.z;
@@ -123,7 +123,7 @@ protected:
 
     vks::Buffer         _sh_buffer;
 
-    Baikal::VkScene&              _scene;
+    Baikal::VkScene const&              _scene;
 
     Properties          _properties;
 

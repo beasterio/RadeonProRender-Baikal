@@ -50,6 +50,17 @@ THE SOFTWARE.
 
 class GPUProfiler;
 
+inline const std::string GetAssetPath()
+{
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    return "";
+#elif defined(VK_EXAMPLE_DATA_DIR)
+    return VK_EXAMPLE_DATA_DIR;
+#else
+    return "../Baikal/Kernels/VK/";
+#endif
+}
+
 namespace Baikal
 {
     class VkOutput;
@@ -59,7 +70,7 @@ namespace Baikal
     {
     public:
 
-        VkRenderer(vks::VulkanDevice* device, rr_instance* instance);
+        VkRenderer(vks::VulkanDevice* device, rr_instance* instance, ResourceManager* resources);
 
         ~VkRenderer();
 
@@ -99,7 +110,7 @@ namespace Baikal
         void PrepareUniformBuffers();
         void PrepareTextureTarget(vks::Texture *tex, uint32_t width, uint32_t height, VkFormat format);
         void PrepareQuadBuffers();
-        void InitRte(VkScene* scene);
+        void InitRte(VkScene const* scene);
 
         // recreate buffers for scene textures
         void PrepareTextureBuffers(VkScene const* scene);
@@ -119,19 +130,22 @@ namespace Baikal
         // List of shader modules created (stored for cleanup)
         std::vector<VkShaderModule> m_shader_modules;
 
-        VkSemaphore m_ao_complete = VK_NULL_HANDLE;
-        VkSemaphore m_gi_complete = VK_NULL_HANDLE;
-        //VkSemaphore m_ao_resolve_complete = VK_NULL_HANDLE;
-        //VkSemaphore m_gi_resolve_complete = VK_NULL_HANDLE;
-        VkSemaphore m_bilateral_filter_complete = VK_NULL_HANDLE;
-        //VkSemaphore m_bilateral_filter_ao_complete = VK_NULL_HANDLE;
-        //VkSemaphore m_offscreen_semaphore = VK_NULL_HANDLE;
-        //VkSemaphore m_shadow_semaphore = VK_NULL_HANDLE;
-        VkSemaphore m_transfer_complete = VK_NULL_HANDLE;
-        //VkSemaphore m_generate_rays_complete = VK_NULL_HANDLE;
-        //VkSemaphore m_gi_trace_complete[2] = { VK_NULL_HANDLE };
-        //VkSemaphore m_ao_trace_complete = VK_NULL_HANDLE;
-
+        struct 
+        {
+            VkSemaphore ao_complete = VK_NULL_HANDLE;
+            VkSemaphore gi_complete = VK_NULL_HANDLE;
+            //VkSemaphore ao_resolve_complete = VK_NULL_HANDLE;
+            //VkSemaphore gi_resolve_complete = VK_NULL_HANDLE;
+            VkSemaphore bilateral_filter_complete = VK_NULL_HANDLE;
+            //VkSemaphore bilateral_filter_ao_complete = VK_NULL_HANDLE;
+            //VkSemaphore offscreen_semaphore = VK_NULL_HANDLE;
+            //VkSemaphore shadow_semaphore = VK_NULL_HANDLE;
+            VkSemaphore transfer_complete = VK_NULL_HANDLE;
+            //VkSemaphore generate_rays_complete = VK_NULL_HANDLE;
+            //VkSemaphore gi_trace_complete[2] = { VK_NULL_HANDLE };
+            //VkSemaphore ao_trace_complete = VK_NULL_HANDLE;
+            //VkSemaphore render_complete = VK_NULL_HANDLE;
+        } m_semaphores;
 
         struct
         {
@@ -163,13 +177,17 @@ namespace Baikal
         DeferredRenderPass* m_deferred_pass = nullptr;
         IrradianceGrid*     m_irradiance_grid = nullptr;
 
+        //CubemapRender*      m_cubemap_render;
+        //CubemapPrefilter*   m_cubemap_prefilter;
+        //vks::TextureCubeMap m_cubemap;
+
         GPUProfilerView::QueryPair m_ao_query;
         GPUProfilerView::QueryPair m_gi_query;
         GPUProfilerView::QueryPair m_filter;
 
         struct
         {
-            //VkPipeline deferred = VK_NULL_HANDLE;
+            VkPipeline deferred = VK_NULL_HANDLE;
             //VkPipeline offscreen = VK_NULL_HANDLE;
             //VkPipeline shadow = VK_NULL_HANDLE;
             //VkPipeline ao = VK_NULL_HANDLE;
@@ -185,7 +203,7 @@ namespace Baikal
         } m_pipelines;
 
         struct {
-            //VkPipelineLayout deferred = VK_NULL_HANDLE;
+            VkPipelineLayout deferred = VK_NULL_HANDLE;
             //VkPipelineLayout offscreen = VK_NULL_HANDLE;
             //VkPipelineLayout shadow = VK_NULL_HANDLE;
             //VkPipelineLayout generateRays = VK_NULL_HANDLE;
@@ -199,7 +217,7 @@ namespace Baikal
         } m_pipeline_layouts;
 
         struct {
-            //VkDescriptorSetLayout deferred = VK_NULL_HANDLE;
+            VkDescriptorSetLayout deferred = VK_NULL_HANDLE;
             //VkDescriptorSetLayout offscreen = VK_NULL_HANDLE;
             //VkDescriptorSetLayout shadow = VK_NULL_HANDLE;
             //VkDescriptorSetLayout generateRays = VK_NULL_HANDLE;
@@ -213,7 +231,7 @@ namespace Baikal
         } m_descriptor_set_layouts;
 
         struct {
-            //VkDescriptorSet deferred = VK_NULL_HANDLE;
+            VkDescriptorSet deferred = VK_NULL_HANDLE;
             //VkDescriptorSet shadow = VK_NULL_HANDLE;
             //VkDescriptorSet ao = VK_NULL_HANDLE;
             //VkDescriptorSet gi = VK_NULL_HANDLE;
@@ -242,6 +260,7 @@ namespace Baikal
         struct {
             vks::Buffer vsFullScreen;
             vks::Buffer vsOffscreen;
+            vks::Buffer vsSceneToCube;
             vks::Buffer fsLights;
         } m_uniform_buffers;
 
@@ -293,6 +312,8 @@ namespace Baikal
         rr_instance* m_rr_instance;
         rte_instance m_rte_instance;
         GPUProfiler* m_profiler;
+
+        ResourceManager* m_resources;
         //GPUProfilerView m_profiler_view;
 
         struct

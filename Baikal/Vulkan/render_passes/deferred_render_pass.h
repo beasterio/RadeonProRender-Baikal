@@ -311,7 +311,7 @@ public:
         submit_info.pWaitSemaphores = &_weight_calc_finished;
         submit_info.waitSemaphoreCount = 1;
         submit_info.pSignalSemaphores = &_signal_finished;
-        submit_info.signalSemaphoreCount = 1;
+        submit_info.signalSemaphoreCount = _signal_finished ? 1 : 0;
         submit_info.commandBufferCount = 1;
         submit_info.pCommandBuffers = &cmd_buffer;
 
@@ -453,8 +453,8 @@ private:
 
         if (!pipeline_list.Present(_pass_name_hash)) {
             std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-                shader_list.Load("shaders/deferred.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/deferred.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/deferred.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/deferred.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
@@ -489,8 +489,8 @@ private:
 
             pipeline_list.Set(_pass_name_hash, pipeline);
 
-            shader_stages[0] = shader_list.Load("shaders/debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
-            shader_stages[1] = shader_list.Load("shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+            shader_stages[0] = shader_list.Load("../Baikal/Kernels/VK/shaders/debug.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+            shader_stages[1] = shader_list.Load("../Baikal/Kernels/VK/shaders/debug.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
 
             VkPipeline debug_pipeline;
             vkCreateGraphicsPipelines(_device->logicalDevice, pipeline_list.GetPipelineCache(), 1, &pipeline_create_info, nullptr, &debug_pipeline);
@@ -640,8 +640,8 @@ private:
 
         if (!pipeline_list.Present(_edge_detect_pass_name_hash)) {
             std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-                shader_list.Load("shaders/edge_detection.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/edge_detection.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/edge_detection.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/edge_detection.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
@@ -753,8 +753,8 @@ private:
 
         if (!pipeline_list.Present(_weight_pass_name_hash)) {
             std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-                shader_list.Load("shaders/weight_calc.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/weight_calc.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/weight_calc.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/weight_calc.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
@@ -879,8 +879,8 @@ private:
 
         if (!pipeline_list.Present(_final_blend_pass_name_hash)) {
             std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-                shader_list.Load("shaders/mlaa_final_blend.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/mlaa_final_blend.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/mlaa_final_blend.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/mlaa_final_blend.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);

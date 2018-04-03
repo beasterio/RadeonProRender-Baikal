@@ -16,7 +16,7 @@ layout (binding = 0) uniform UBO
     vec4 cameraPosition;
 } ubo;
 
-layout (binding = 5) uniform DynamicUBO 
+layout (binding = 10) uniform DynamicUBO 
 {
     mat4 model; 
 } dynamicUbo;
@@ -36,9 +36,13 @@ out gl_PerVertex
 void main() 
 {
     vec4 position_ps = ubo.projection * ubo.view * dynamicUbo.model * vec4(inPos.xyz, 1.0f);
+    //vec4 position_ps = ubo.projection * ubo.view * vec4(inPos.xyz, 1.0f);
+    //vec4 position_ps = ubo.projection * ubo.view * dynamicUbo.model * vec4(inNormal.x, inNormal.y,inNormal.z, 1.0f);
     vec3 position_cs = position_ps.xyz / position_ps.w;
     vec2 position_ss = position_cs.xy * vec2(0.5f, -0.5f) + vec2(0.5f, 0.5f);
     
+    //vec4 prev_position_ps = ubo.prevViewProjection * dynamicUbo.model * vec4(inPos.xyz, 1.0f);
+    //vec4 prev_position_ps = ubo.prevViewProjection * vec4(inPos.xyz, 1.0f);
     vec4 prev_position_ps = ubo.prevViewProjection * dynamicUbo.model * vec4(inPos.xyz, 1.0f);
     vec2 prev_position_cs = prev_position_ps.xy / prev_position_ps.w;
     vec2 prev_position_ss = prev_position_cs * vec2(0.5f, -0.5f) + vec2(0.5f, 0.5f);
@@ -49,9 +53,13 @@ void main()
     outUV.t = 1.0 - outUV.t;
 
     // Vertex position in world space
+    //outWorldPos = vec3(ubo.view * dynamicUbo.model * vec4(inPos.xyz, 1.0f));
+    //outWorldPos = vec3(ubo.view * vec4(inPos.xyz, 1.0f));
     outWorldPos = vec3(ubo.view * dynamicUbo.model * vec4(inPos.xyz, 1.0f));
 
     // Normal in world space
+    //mat3 mNormal = mat3(ubo.view * dynamicUbo.model);
+    //mat3 mNormal = mat3(ubo.view);
     mat3 mNormal = mat3(ubo.view * dynamicUbo.model);
     outNormal = mNormal * normalize(inNormal.xyz);	
     outTangent = mNormal * normalize(inTangent.xyz);

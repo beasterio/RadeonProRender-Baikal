@@ -12,16 +12,17 @@
 #include "../resources/resource_manager.h"
 
 #include "../utils/static_hash.h"
+#include "Renderers/vk_renderer.h"
 
 class ShadowRenderPass : public RenderPass
 {
 public:
-    ShadowRenderPass(vks::VulkanDevice* device, Baikal::VkScene& scene) : RenderPass(device), _scene(&scene) {
+    ShadowRenderPass(vks::VulkanDevice* device, ResourceManager* resources) : RenderPass(device), _resources(resources) {
         AllocateResources();
                 
-        _descriptor_set_layout = scene.resources->GetDescriptionSetLayoutList().Get(_pass_name_hash);
-        _pipeline_layout = scene.resources->GetPipepineLayoutList().Get(_pass_name_hash);
-        _pipeline = scene.resources->GetPipepineList().Get(_pass_name_hash);
+        _descriptor_set_layout = _resources->GetDescriptionSetLayoutList().Get(_pass_name_hash);
+        _pipeline_layout = _resources->GetPipepineLayoutList().Get(_pass_name_hash);
+        _pipeline = _resources->GetPipepineList().Get(_pass_name_hash);
     }
 
     ~ShadowRenderPass() {
@@ -105,15 +106,15 @@ private:
     void AllocateResources() {
         using namespace vks::initializers;
 
-        assert(_scene->resources);
+        assert(_resources);
 
-        ShaderList& shader_list = _scene->resources->GetShaderList();
-        PipelineList& pipeline_list = _scene->resources->GetPipepineList();
-        PipelineLayoutList& pipelinelayout_list = _scene->resources->GetPipepineLayoutList();
-        DescriptionSetLayoutList& desc_set_layout_list = _scene->resources->GetDescriptionSetLayoutList();
-        BuffersList& uniform_buffers_list = _scene->resources->GetBuffersList();
-        DescriptionSetList& desc_set_list = _scene->resources->GetDescriptionSetList();
-        VertexDescriptionList& vertex_desc_list = _scene->resources->GetVertexDescriptions();
+        ShaderList& shader_list = _resources->GetShaderList();
+        PipelineList& pipeline_list = _resources->GetPipepineList();
+        PipelineLayoutList& pipelinelayout_list = _resources->GetPipepineLayoutList();
+        DescriptionSetLayoutList& desc_set_layout_list = _resources->GetDescriptionSetLayoutList();
+        BuffersList& uniform_buffers_list = _resources->GetBuffersList();
+        DescriptionSetList& desc_set_list = _resources->GetDescriptionSetList();
+        VertexDescriptionList& vertex_desc_list = _resources->GetVertexDescriptions();
 
         for (int i = 0; i < LIGHT_COUNT; i++) {
             _framebuffer[i] = new vks::Framebuffer(_device);
@@ -169,8 +170,8 @@ private:
 
         if (!pipeline_list.Present(_pass_name_hash)) {
             std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-                shader_list.Load("shaders/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/shadow.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/shadow.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state  = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
@@ -240,5 +241,5 @@ protected:
 
     const char*             _pass_name = "Shadow Pass";
     const uint32_t          _pass_name_hash = STATIC_CRC32(_pass_name);
-    Baikal::VkScene*        _scene;
+    ResourceManager*        _resources;
 };

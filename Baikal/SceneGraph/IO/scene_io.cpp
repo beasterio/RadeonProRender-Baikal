@@ -275,28 +275,52 @@ namespace Baikal
             }
         }
 
-        // TODO: temporary code, add IBL
-        auto ibl_texture = image_io->LoadImage("../Resources/Textures/studio015.hdr");
-        //auto ibl_texture1 = image_io->LoadImage("../Resources/Textures/sky.hdr");
+        //// TODO: temporary code, add IBL
+        //auto ibl_texture = image_io->LoadImage("../Resources/Textures/studio015.hdr");
+        ////auto ibl_texture1 = image_io->LoadImage("../Resources/Textures/sky.hdr");
 
-        auto ibl = ImageBasedLight::Create();
-        ibl->SetTexture(ibl_texture);
-        //ibl->SetReflectionTexture(ibl_texture1);
-        //ibl->SetBackgroundTexture(ibl_texture1);
-        ibl->SetMultiplier(3.f);
+        //auto ibl = ImageBasedLight::Create();
+        //ibl->SetTexture(ibl_texture);
+        ////ibl->SetReflectionTexture(ibl_texture1);
+        ////ibl->SetBackgroundTexture(ibl_texture1);
+        //ibl->SetMultiplier(3.f);
+
+        //// TODO: temporary code to add directional light
+        //auto light = DirectionalLight::Create();
+        //light->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
+        //light->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
+
+        //auto light1 = DirectionalLight::Create();
+        //light1->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
+        //light1->SetEmittedRadiance(5.f * RadeonRays::float3(1.f, 0.8f, 0.65f));
+
+        //scene->AttachLight(light);
+        //scene->AttachLight(light1);
+        //scene->AttachLight(ibl);
 
         // TODO: temporary code to add directional light
-        auto light = DirectionalLight::Create();
-        light->SetDirection(RadeonRays::normalize(RadeonRays::float3(-1.1f, -0.6f, -0.2f)));
-        light->SetEmittedRadiance(30.f * RadeonRays::float3(1.f, 0.95f, 0.92f));
+        auto light = SpotLight::Create();
+        light->SetDirection(RadeonRays::normalize(RadeonRays::float3(-0.81f, -0.074f, -0.57f)));
+        light->SetPosition(RadeonRays::float3(23.8847504f, 16.0555954f, 5.01268339f));
+        light->SetEmittedRadiance(150000.0f * RadeonRays::float3(1.f, 1.f, 1.f));
+        light->SetConeShape(RadeonRays::float2(0.9f, 0.96f));
 
-        auto light1 = DirectionalLight::Create();
-        light1->SetDirection(RadeonRays::float3(0.3f, -1.f, -0.5f));
-        light1->SetEmittedRadiance(5.f * RadeonRays::float3(1.f, 0.8f, 0.65f));
+        auto light1 = SpotLight::Create();
+        light1->SetDirection(RadeonRays::float3(-1.f, 0.f, 0.f));
+        light1->SetPosition(RadeonRays::float3(0.0f, 35.f, 0.0f));
+        light1->SetEmittedRadiance(13000.0f * RadeonRays::float3(1.f, 1.f, 1.f));
+        light1->SetConeShape(RadeonRays::float2(0.9f, 0.96f));
+
+        auto light2 = SpotLight::Create();
+        light2->SetDirection(RadeonRays::normalize(RadeonRays::float3(0.3f, -1.f, -0.5f)));
+        light2->SetPosition(RadeonRays::float3(24.2759151f, 17.7952175f, -4.77304792f));
+        light2->SetEmittedRadiance(150000.0f * RadeonRays::float3(1.f, 1.f, 1.f));
+        light2->SetConeShape(RadeonRays::float2(0.9f, 0.96f));
 
         scene->AttachLight(light);
         scene->AttachLight(light1);
-        scene->AttachLight(ibl);
+        scene->AttachLight(light2);
+        //scene->AttachLight(ibl);
 
         return scene;
     }

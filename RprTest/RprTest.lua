@@ -21,7 +21,7 @@ project "RprTest"
                 "../3rdparty/glm",
                 "../3rdparty/gli",
                 "../3rdparty",
-                "../3rdparty/assimp",
+                "../3rdparty/assimp/include",
                 "../3rdParty/ProRenderGLTF/include" }
 
     if os.is("macosx") then
@@ -33,13 +33,14 @@ project "RprTest"
 
     if os.is("windows") then
         includedirs { "../3rdparty/oiio/include"  }
-        links {"RadeonRays",}
+        links {"RadeonRays", "assimp"}
         libdirs {   "../3rdparty/freeglut/lib/%{cfg.platform}", 
                     "../3rdparty/embree/lib/%{cfg.platform}", 
                     "../3rdparty/oiio/lib/%{cfg.platform}",
                     "../3rdparty/ProRenderGLTF/lib/%{cfg.platform}",
                     "../3rdparty/RprLoadStore/lib/%{cfg.platform}",
                     "../3rdparty/RprSupport/lib/%{cfg.platform}",
+                    "../3rdparty/assimp/lib/",
                     "../3rdparty/vulkan/lib/",
                      }
         configuration {"Debug"}

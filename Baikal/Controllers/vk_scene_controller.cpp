@@ -60,7 +60,11 @@ namespace Baikal
 
     void GetBaikalTextureData(Texture::Ptr tex, std::string* out_name, VkFormat* out_format, int* w, int* h, void const** out_data, VkDeviceSize* out_data_size)
     {
-        *out_name = tex->GetName() + "_" + std::to_string((std::uintptr_t)tex.get());
+        //*out_name = tex->GetName() + "_" + std::to_string((std::uintptr_t)tex.get());
+        std::string base_filename = tex->GetName().substr(tex->GetName().find_last_of("/\\") + 1);
+        std::string name = base_filename + "_" + std::to_string((std::uintptr_t)tex.get());
+        std::reverse(name.begin(), name.end());
+        *out_name = name;
         *w = tex->GetSize().x;
         *h = tex->GetSize().y;
         *out_data = tex->GetData();
@@ -179,10 +183,11 @@ namespace Baikal
         return 0;
     }
      
-    VkSceneController::VkSceneController(vks::VulkanDevice* device, rr_instance& instance, vks::Buffer* defaultUBO)
+    VkSceneController::VkSceneController(vks::VulkanDevice* device, rr_instance& instance, vks::Buffer* defaultUBO, ResourceManager* resources)
         : m_instance(&instance)
         , m_vulkan_device(device)
         , m_defaultUBO(defaultUBO)
+        , m_resources(resources)
     {
     }
 
@@ -310,24 +315,24 @@ namespace Baikal
 
             for (uint32_t i = 0; i < mesh->GetNumVertices(); i++)
             {
-                vertices[i].pos = glm::make_vec3(&mesh->GetVertices()[i].x);// *0.5f;
-                //vertices[i].pos.y = -vertices[i].pos.y;
-                vertices[i].pos.y = vertices[i].pos.y;
-                vertices[i].uv = (hasUV) ? glm::make_vec2(&mesh->GetUVs()[i].x) : glm::vec2(0.0f);
-                vertices[i].normal = glm::make_vec3(&mesh->GetNormals()[i].x);
-                //vertices[i].normal.y = -vertices[i].normal.y;
-                vertices[i].normal.y = vertices[i].normal.y;
-                vertices[i].color = glm::vec3(1.0f); // todo : take from material
+                glm::vec3 pos = glm::make_vec3(&mesh->GetVertices()[i].x);// *0.5f;
+                glm::vec3 normal = glm::make_vec3(&mesh->GetNormals()[i].x);
+                glm::vec2 uv = (hasUV) ? glm::make_vec2(&mesh->GetUVs()[i].x) : glm::vec2(0.0f);
+                vertices[i].posUVx = glm::vec4(pos, uv.x);
+                vertices[i].normalUVy = glm::vec4(normal, uv.y);
                 //TODO: fix tangent
                 //vertices[i].tangent = (hasTangent) ? glm::make_vec3(&aMesh->mTangents[i].x) : glm::vec3(0.0f, 1.0f, 0.0f);
-                vertices[i].tangent = glm::vec3(0.0f, 1.0f, 0.0f);
-                meshPositions[i] = RadeonRays::float3(vertices[i].pos.x, vertices[i].pos.y, vertices[i].pos.z);
+                vertices[i].tangent = glm::vec4(0.f, 1.f, 0.f, 0.f);
+                meshPositions[i] = RadeonRays::float3(pos.x, pos.y, pos.z);
                 out.vertices.push_back(vertices[i]);
 
+                out.bbox._min = glm::min(out.bbox._min, glm::vec4(pos, 0.f));
+                out.bbox._max = glm::max(out.bbox._max, glm::vec4(pos, 0.f));
+
                 RaytraceVertex rtv;
-                rtv.pos = vertices[i].pos;
-                rtv.normal = vertices[i].normal;
-                rtv.uv = vertices[i].uv;
+                rtv.pos = pos;
+                rtv.normal = normal;
+                rtv.uv = uv;
                 out.raytrace_vertices.push_back(rtv);
             }
 
@@ -414,25 +419,143 @@ namespace Baikal
         out.dirty_flags |= VkScene::DirtyFlags::LIGHTS;
 
         out.lights.clear();
+
+        std::vector<rte_light> lights;
         auto it = scene.CreateLightIterator();
         for (; it->IsValid(); it->Next())
         {
             Baikal::Light::Ptr baikal_light = it->ItemAs<Baikal::Light>();
+            Baikal::AreaLight* area = dynamic_cast<Baikal::AreaLight*>(baikal_light.get());
+            Baikal::PointLight* point = dynamic_cast<Baikal::PointLight*>(baikal_light.get());
+            Baikal::DirectionalLight* direct = dynamic_cast<Baikal::DirectionalLight*>(baikal_light.get());
+            Baikal::SpotLight* spot = dynamic_cast<Baikal::SpotLight*>(baikal_light.get());
+            Baikal::ImageBasedLight* ibl = dynamic_cast<Baikal::ImageBasedLight*>(baikal_light.get());
 
             VkLight l;
             RadeonRays::float3 col = baikal_light->GetEmittedRadiance();
             RadeonRays::float3 pos = baikal_light->GetPosition();
-            RadeonRays::float3 target = baikal_light->GetPosition() + baikal_light->GetDirection();
+            RadeonRays::float3 dir = baikal_light->GetDirection();
+            RadeonRays::float3 target = baikal_light->GetPosition() + dir;
 
             l.color = { col.x, col.y, col.z, 1.f};
             //l.position = { pos.x, -pos.y, pos.z, 1.f };
             //l.target = { target.x, -target.y, target.z, 1.f };
             l.position = { pos.x, pos.y, pos.z, 1.f };
             l.target = { target.x, target.y, target.z, 1.f };
-
             out.lights.push_back(l);
+
+            rte_light rte_l;
+            //rte_l.position[0] = l.position.x;
+            //rte_l.position[1] = l.position.y;
+            //rte_l.position[2] = l.position.z;
+            //rte_l.intensity[0] = l.color.x;
+            //rte_l.intensity[1] = l.color.y;
+            //rte_l.intensity[2] = l.color.z;
+            //rte_l.intensity[3] = 1.f;
+            //rte_l.direction[0] = dir.x;
+            //rte_l.direction[1] = dir.y;
+            //rte_l.direction[2] = dir.z;
+            //
+            //if (area)
+            //{
+            //    rte_l.type = RTE_LIGHT_AREA;
+            //    rte_l.areaLightShapeIndex = area->GetPrimitiveIdx();
+            //    continue;
+
+            //}
+            //else if (point)
+            //{
+            //    rte_l.type = RTE_LIGHT_POINT;
+            //}
+            //else if (direct)
+            //{
+            //    rte_l.type = RTE_LIGHT_DIRECTIONAL;
+            //}
+            //else if (spot)
+            //{
+            //    rte_l.type = RTE_LIGHT_SPOT;
+            //    auto angles = spot->GetConeShape();
+            //    rte_l.spotAngles[0] = angles.x;
+            //    rte_l.spotAngles[1] = angles.y;
+            //}
+            //else if (ibl)
+            //{
+            //    rte_l.type = RTE_LIGHT_IBL;
+            //    rte_l.iblTexture = 0;
+            //    continue;
+            //}
+            lights.push_back(rte_l);
         }
 
+        //rte lights
+        VkBufferCreateInfo raytraceLightsBufferInfo;
+
+        auto numLights = lights.size();
+        auto device = m_vulkan_device->logicalDevice;
+        void *data;
+
+        VkMemoryAllocateInfo memAlloc = vks::initializers::memoryAllocateInfo();
+        VkMemoryRequirements memReqs;
+        struct
+        {
+            struct {
+                VkDeviceMemory memory;
+                VkBuffer buffer;
+            } raytraceLightsBuffer;
+        } staging;
+
+        // Staging buffer
+        raytraceLightsBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, numLights * sizeof(rte_light));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceLightsBufferInfo, nullptr, &staging.raytraceLightsBuffer.buffer));
+        vkGetBufferMemoryRequirements(device, staging.raytraceLightsBuffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceLightsBuffer.memory));
+        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceLightsBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+        memcpy(data, lights.data(), numLights * sizeof(rte_light));
+        vkUnmapMemory(device, staging.raytraceLightsBuffer.memory);
+        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceLightsBuffer.buffer, staging.raytraceLightsBuffer.memory, 0));
+
+        // Target
+        raytraceLightsBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, numLights * sizeof(rte_light));
+        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceLightsBufferInfo, nullptr, &out.raytrace_lights_buffer.buffer));
+        vkGetBufferMemoryRequirements(device, out.raytrace_lights_buffer.buffer, &memReqs);
+        memAlloc.allocationSize = memReqs.size;
+        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_lights_buffer.memory));
+        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_lights_buffer.buffer, out.raytrace_lights_buffer.memory, 0));
+        out.raytrace_lights_buffer.size = numLights * sizeof(rte_light);
+
+        //copy
+        VkQueue queue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
+        VkBufferCopy copyRegion = {};
+        copyRegion.size = numLights * sizeof(rte_light);
+
+        VkCommandBuffer copy_cmd = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
+        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
+        VK_CHECK_RESULT(vkBeginCommandBuffer(copy_cmd, &cmdBufInfo));
+
+        vkCmdCopyBuffer(
+            copy_cmd,
+            staging.raytraceLightsBuffer.buffer,
+            out.raytrace_lights_buffer.buffer,
+            1,
+            &copyRegion);
+
+        VK_CHECK_RESULT(vkEndCommandBuffer(copy_cmd));
+
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &copy_cmd;
+
+        VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+        VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+
+        vkDestroyBuffer(device, staging.raytraceLightsBuffer.buffer, nullptr);
+        vkFreeMemory(device, staging.raytraceLightsBuffer.memory, nullptr);
+        vkFreeCommandBuffers(device, m_vulkan_device->commandPool, 1, &copy_cmd);
     }
 
     // Update material data.
@@ -641,7 +764,6 @@ namespace Baikal
     void VkSceneController::UpdateSceneAttributes(Scene1 const& scene, Collector& tex_collector, VkScene& out) const
     {
         out.dirty_flags |= VkScene::DirtyFlags::SCENE_ATTRIBUTES;
-
     }
 
 
@@ -649,6 +771,7 @@ namespace Baikal
     {
         DeallocateOnGPU(out);
 
+        out.resources = m_resources;
         auto& device = m_vulkan_device->logicalDevice;
         VkQueue queue;
         vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
@@ -677,10 +800,6 @@ namespace Baikal
                 VkDeviceMemory memory;
                 VkBuffer buffer;
             } raytraceShapeBuffer;
-            struct {
-                VkDeviceMemory memory;
-                VkBuffer buffer;
-            } raytraceMaterialBuffer;
             struct {
                 VkDeviceMemory memory;
                 VkBuffer buffer;
@@ -769,27 +888,27 @@ namespace Baikal
         // Generate raytrace shape buffer
         VkBufferCreateInfo raytraceMaterialBufferInfo;
 
-        // Staging buffer
-        raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, materialBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &staging.raytraceMaterialBuffer.buffer));
-        vkGetBufferMemoryRequirements(device, staging.raytraceMaterialBuffer.buffer, &memReqs);
-        memAlloc.allocationSize = memReqs.size;
-        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceMaterialBuffer.memory));
-        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceMaterialBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        memcpy(data, out.raytrace_materials.data(), materialBufferSize);
-        vkUnmapMemory(device, staging.raytraceMaterialBuffer.memory);
-        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceMaterialBuffer.buffer, staging.raytraceMaterialBuffer.memory, 0));
+        //// Staging buffer
+        //raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, materialBufferSize);
+        //VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &staging.raytraceMaterialBuffer.buffer));
+        //vkGetBufferMemoryRequirements(device, staging.raytraceMaterialBuffer.buffer, &memReqs);
+        //memAlloc.allocationSize = memReqs.size;
+        //memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceMaterialBuffer.memory));
+        //VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceMaterialBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+        //memcpy(data, out.raytrace_materials.data(), materialBufferSize);
+        //vkUnmapMemory(device, staging.raytraceMaterialBuffer.memory);
+        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceMaterialBuffer.buffer, staging.raytraceMaterialBuffer.memory, 0));
 
-        // Target
-        raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, materialBufferSize);
-        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &out.raytrace_material_buffer.buffer));
-        vkGetBufferMemoryRequirements(device, out.raytrace_material_buffer.buffer, &memReqs);
-        memAlloc.allocationSize = memReqs.size;
-        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_material_buffer.memory));
-        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_material_buffer.buffer, out.raytrace_material_buffer.memory, 0));
-        out.raytrace_material_buffer.size = memReqs.size;
+        //// Target
+        //raytraceMaterialBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, materialBufferSize);
+        //VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceMaterialBufferInfo, nullptr, &out.raytrace_material_buffer.buffer));
+        //vkGetBufferMemoryRequirements(device, out.raytrace_material_buffer.buffer, &memReqs);
+        //memAlloc.allocationSize = memReqs.size;
+        //memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_material_buffer.memory));
+        //VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_material_buffer.buffer, out.raytrace_material_buffer.memory, 0));
+        //out.raytrace_material_buffer.size = memReqs.size;
 
 
         // Generate raytrace shape buffer
@@ -829,92 +948,92 @@ namespace Baikal
         // Raytrace light
         VkBufferCreateInfo raytraceLightsBufferInfo;
 
-        float height = 35.0f;
-        auto dir1 = glm::normalize(-glm::vec3(23.8847504f, 16.0555954f, 5.01268339f) + glm::vec3(23.0653629f, 15.9814873f, 4.44425392f));
-        auto dir2 = glm::normalize(-glm::vec3(0.0f, height, 0.0f) + glm::vec3(-1.0f, height, 0.0f));
-        auto dir3 = glm::normalize(-glm::vec3(24.2759151f, 17.7952175f, -4.77304792f) + glm::vec3(23.3718319f, 17.5660172f, -4.41235495f));
+        //float height = 35.0f;
+        //auto dir1 = glm::normalize(-glm::vec3(23.8847504f, 16.0555954f, 5.01268339f) + glm::vec3(23.0653629f, 15.9814873f, 4.44425392f));
+        //auto dir2 = glm::normalize(-glm::vec3(0.0f, height, 0.0f) + glm::vec3(-1.0f, height, 0.0f));
+        //auto dir3 = glm::normalize(-glm::vec3(24.2759151f, 17.7952175f, -4.77304792f) + glm::vec3(23.3718319f, 17.5660172f, -4.41235495f));
 
-        rte_light lights[4];
-        lights[0].position[0] = 23.8847504f;
-        lights[0].position[1] = 16.0555954f;
-        lights[0].position[2] = 5.01268339f;
-        lights[0].type = RTE_LIGHT_SPOT;
-        lights[0].intensity[0] = 150000.0f;
-        lights[0].intensity[1] = 150000.0f;
-        lights[0].intensity[2] = 150000.0f;
-        lights[0].intensity[3] = 1.0f;
-        lights[0].direction[0] = dir1.x;
-        lights[0].direction[1] = dir1.y;
-        lights[0].direction[2] = dir1.z;
-        lights[0].spotAngles[0] = 0.9f;
-        lights[0].spotAngles[1] = 0.96f;
+        //rte_light lights[4];
+        //lights[0].position[0] = 23.8847504f;
+        //lights[0].position[1] = 16.0555954f;
+        //lights[0].position[2] = 5.01268339f;
+        //lights[0].type = RTE_LIGHT_SPOT;
+        //lights[0].intensity[0] = 150000.0f;
+        //lights[0].intensity[1] = 150000.0f;
+        //lights[0].intensity[2] = 150000.0f;
+        //lights[0].intensity[3] = 1.0f;
+        //lights[0].direction[0] = dir1.x;
+        //lights[0].direction[1] = dir1.y;
+        //lights[0].direction[2] = dir1.z;
+        //lights[0].spotAngles[0] = 0.9f;
+        //lights[0].spotAngles[1] = 0.96f;
 
-        lights[1].position[0] = 0.0f;
-        lights[1].position[1] = height;
-        lights[1].position[2] = 0.0f;
-        lights[1].type = RTE_LIGHT_SPOT;
-        lights[1].intensity[0] = 13000.0f;
-        lights[1].intensity[1] = 13000.0f;
-        lights[1].intensity[2] = 13000.0f;
-        lights[1].intensity[3] = 1.0f;
-        lights[1].direction[0] = dir2.x;
-        lights[1].direction[1] = dir2.y;
-        lights[1].direction[2] = dir2.z;
-        lights[1].spotAngles[0] = 0.9f;
-        lights[1].spotAngles[1] = 0.96f;
+        //lights[1].position[0] = 0.0f;
+        //lights[1].position[1] = height;
+        //lights[1].position[2] = 0.0f;
+        //lights[1].type = RTE_LIGHT_SPOT;
+        //lights[1].intensity[0] = 13000.0f;
+        //lights[1].intensity[1] = 13000.0f;
+        //lights[1].intensity[2] = 13000.0f;
+        //lights[1].intensity[3] = 1.0f;
+        //lights[1].direction[0] = dir2.x;
+        //lights[1].direction[1] = dir2.y;
+        //lights[1].direction[2] = dir2.z;
+        //lights[1].spotAngles[0] = 0.9f;
+        //lights[1].spotAngles[1] = 0.96f;
 
-        lights[2].position[0] = 24.2759151f;
-        lights[2].position[1] = 17.7952175f;
-        lights[2].position[2] = -4.77304792f;
-        lights[2].type = RTE_LIGHT_SPOT;
-        lights[2].intensity[0] = 15000.0f;
-        lights[2].intensity[1] = 15000.0f;
-        lights[2].intensity[2] = 15000.0f;
-        lights[2].intensity[3] = 1.0f;
-        lights[2].direction[0] = dir3.x;
-        lights[2].direction[1] = dir3.y;
-        lights[2].direction[2] = dir3.z;
-        lights[2].spotAngles[0] = 0.9f;
-        lights[2].spotAngles[1] = 0.96f;
+        //lights[2].position[0] = 24.2759151f;
+        //lights[2].position[1] = 17.7952175f;
+        //lights[2].position[2] = -4.77304792f;
+        //lights[2].type = RTE_LIGHT_SPOT;
+        //lights[2].intensity[0] = 15000.0f;
+        //lights[2].intensity[1] = 15000.0f;
+        //lights[2].intensity[2] = 15000.0f;
+        //lights[2].intensity[3] = 1.0f;
+        //lights[2].direction[0] = dir3.x;
+        //lights[2].direction[1] = dir3.y;
+        //lights[2].direction[2] = dir3.z;
+        //lights[2].spotAngles[0] = 0.9f;
+        //lights[2].spotAngles[1] = 0.96f;
 
-        lights[3].position[0] = 24.2759151f;
-        lights[3].position[1] = -17.7952175f;
-        lights[3].position[2] = -4.77304792f;
-        lights[3].type = RTE_LIGHT_AREA;
-        lights[3].intensity[0] = 100.0f;
-        lights[3].intensity[1] = 80.0f;
-        lights[3].intensity[2] = 70.0f;
-        lights[3].intensity[3] = 1.0f;
-        lights[3].direction[0] = dir3.x;
-        lights[3].direction[1] = dir3.y;
-        lights[3].direction[2] = dir3.z;
-        lights[3].spotAngles[0] = 0.3f;
-        lights[3].spotAngles[1] = 0.6f;
-        lights[3].areaLightShapeIndex = 0;
+        //lights[3].position[0] = 24.2759151f;
+        //lights[3].position[1] = -17.7952175f;
+        //lights[3].position[2] = -4.77304792f;
+        //lights[3].type = RTE_LIGHT_AREA;
+        //lights[3].intensity[0] = 100.0f;
+        //lights[3].intensity[1] = 80.0f;
+        //lights[3].intensity[2] = 70.0f;
+        //lights[3].intensity[3] = 1.0f;
+        //lights[3].direction[0] = dir3.x;
+        //lights[3].direction[1] = dir3.y;
+        //lights[3].direction[2] = dir3.z;
+        //lights[3].spotAngles[0] = 0.3f;
+        //lights[3].spotAngles[1] = 0.6f;
+        //lights[3].areaLightShapeIndex = 0;
 
-        auto numLights = sizeof(lights) / sizeof(rte_light);
+        //auto numLights = sizeof(lights) / sizeof(rte_light);
 
-        // Staging buffer
-        raytraceLightsBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, numLights * sizeof(rte_light));
-        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceLightsBufferInfo, nullptr, &staging.raytraceLightsBuffer.buffer));
-        vkGetBufferMemoryRequirements(device, staging.raytraceLightsBuffer.buffer, &memReqs);
-        memAlloc.allocationSize = memReqs.size;
-        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceLightsBuffer.memory));
-        VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceLightsBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
-        memcpy(data, lights, numLights * sizeof(rte_light));
-        vkUnmapMemory(device, staging.raytraceLightsBuffer.memory);
-        VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceLightsBuffer.buffer, staging.raytraceLightsBuffer.memory, 0));
+        //// Staging buffer
+        //raytraceLightsBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, numLights * sizeof(rte_light));
+        //VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceLightsBufferInfo, nullptr, &staging.raytraceLightsBuffer.buffer));
+        //vkGetBufferMemoryRequirements(device, staging.raytraceLightsBuffer.buffer, &memReqs);
+        //memAlloc.allocationSize = memReqs.size;
+        //memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &staging.raytraceLightsBuffer.memory));
+        //VK_CHECK_RESULT(vkMapMemory(device, staging.raytraceLightsBuffer.memory, 0, VK_WHOLE_SIZE, 0, &data));
+        //memcpy(data, lights, numLights * sizeof(rte_light));
+        //vkUnmapMemory(device, staging.raytraceLightsBuffer.memory);
+        //VK_CHECK_RESULT(vkBindBufferMemory(device, staging.raytraceLightsBuffer.buffer, staging.raytraceLightsBuffer.memory, 0));
 
-        // Target
-        raytraceLightsBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, numLights * sizeof(rte_light));
-        VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceLightsBufferInfo, nullptr, &out.raytrace_lights_buffer.buffer));
-        vkGetBufferMemoryRequirements(device, out.raytrace_lights_buffer.buffer, &memReqs);
-        memAlloc.allocationSize = memReqs.size;
-        memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_lights_buffer.memory));
-        VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_lights_buffer.buffer, out.raytrace_lights_buffer.memory, 0));
-        out.raytrace_lights_buffer.size = numLights * sizeof(rte_light);
+        //// Target
+        //raytraceLightsBufferInfo = vks::initializers::bufferCreateInfo(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, numLights * sizeof(rte_light));
+        //VK_CHECK_RESULT(vkCreateBuffer(device, &raytraceLightsBufferInfo, nullptr, &out.raytrace_lights_buffer.buffer));
+        //vkGetBufferMemoryRequirements(device, out.raytrace_lights_buffer.buffer, &memReqs);
+        //memAlloc.allocationSize = memReqs.size;
+        //memAlloc.memoryTypeIndex = GetMemTypeIndex(m_vulkan_device->physicalDevice, memReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        //VK_CHECK_RESULT(vkAllocateMemory(device, &memAlloc, nullptr, &out.raytrace_lights_buffer.memory));
+        //VK_CHECK_RESULT(vkBindBufferMemory(device, out.raytrace_lights_buffer.buffer, out.raytrace_lights_buffer.memory, 0));
+        //out.raytrace_lights_buffer.size = numLights * sizeof(rte_light);
 
 
         // Copyx
@@ -947,14 +1066,6 @@ namespace Baikal
             1,
             &copyRegion);
 
-        copyRegion.size = materialBufferSize;
-        vkCmdCopyBuffer(
-            copy_cmd,
-            staging.raytraceMaterialBuffer.buffer,
-            out.raytrace_material_buffer.buffer,
-            1,
-            &copyRegion);
-
         copyRegion.size = kRNGBufferSize;
         vkCmdCopyBuffer(
             copy_cmd,
@@ -963,13 +1074,13 @@ namespace Baikal
             1,
             &copyRegion);
 
-        copyRegion.size = numLights * sizeof(rte_light);
-        vkCmdCopyBuffer(
-            copy_cmd,
-            staging.raytraceLightsBuffer.buffer,
-            out.raytrace_lights_buffer.buffer,
-            1,
-            &copyRegion);
+        //copyRegion.size = numLights * sizeof(rte_light);
+        //vkCmdCopyBuffer(
+        //    copy_cmd,
+        //    staging.raytraceLightsBuffer.buffer,
+        //    out.raytrace_lights_buffer.buffer,
+        //    1,
+        //    &copyRegion);
 
         VK_CHECK_RESULT(vkEndCommandBuffer(copy_cmd));
 
@@ -987,16 +1098,35 @@ namespace Baikal
         vkFreeMemory(device, staging.iBuffer.memory, nullptr);
         vkDestroyBuffer(device, staging.raytraceShapeBuffer.buffer, nullptr);
         vkFreeMemory(device, staging.raytraceShapeBuffer.memory, nullptr);
-        vkDestroyBuffer(device, staging.raytraceMaterialBuffer.buffer, nullptr);
-        vkFreeMemory(device, staging.raytraceMaterialBuffer.memory, nullptr);
         vkDestroyBuffer(device, staging.raytraceRNGBuffer.buffer, nullptr);
         vkFreeMemory(device, staging.raytraceRNGBuffer.memory, nullptr);
+    }
+
+    void VkSceneController::DeallocateOnGPU(VkScene& out) const
+    {
+        out.index_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_shape_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_material_buffer.device = m_vulkan_device->logicalDevice;
+        out.raytrace_RNG_buffer.device = m_vulkan_device->logicalDevice;
+
+        out.index_buffer.destroy();
+        out.raytrace_shape_buffer.destroy();
+        out.raytrace_material_buffer.destroy();
+        out.raytrace_RNG_buffer.destroy();
+    }
+
+    void VkSceneController::CreateDescriptorSets(VkScene& out) const
+    {
+        auto& device = m_vulkan_device->logicalDevice;
+        // Generate descriptor sets for all meshes
+        // todo : think about a nicer solution, better suited per material?
 
         // Decriptor pool
         std::vector<VkDescriptorPoolSize> poolSizes;
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(out.meshes.size() * 15)));
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(out.meshes.size() * 15)));
         poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(10)));
+        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, static_cast<uint32_t>(out.meshes.size())));
 
         VkDescriptorPoolCreateInfo descriptorPoolInfo =
             vks::initializers::descriptorPoolCreateInfo(
@@ -1033,6 +1163,20 @@ namespace Baikal
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_SHADER_STAGE_FRAGMENT_BIT,
             4));
+        // Binding 10: mesh tranform
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            10));
+
+        // Binding 5-7: Shadows
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 5));
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 6));
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 7));
+        // Binding 8: Lights
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 8));
+        // Binding 9: EnvMap
+        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 9));
 
         VkDescriptorSetLayoutCreateInfo descriptorLayout =
             vks::initializers::descriptorSetLayoutCreateInfo(
@@ -1051,17 +1195,6 @@ namespace Baikal
         pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
 
         VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &out.pipelineLayout));
-
-        // Create resources for forward pass (cubemap)
-
-        // Binding 5-7: Shadows
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 5));
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 6));
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 7));
-        // Binding 8: Lights
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT, 8));
-        // Binding 9: EnvMap
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 9));
 
         VkDescriptorSetLayoutCreateInfo cubemapDescriptorLayout = vks::initializers::descriptorSetLayoutCreateInfo(setLayoutBindings.data(), static_cast<uint32_t>(setLayoutBindings.size()));
 
@@ -1131,153 +1264,11 @@ namespace Baikal
                 VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                 4,
                 &out.meshes[i].material->metallic.descriptor));
-
-            vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-        }
-    }
-
-    void VkSceneController::DeallocateOnGPU(VkScene& out) const
-    {
-        out.index_buffer.device = m_vulkan_device->logicalDevice;
-        out.raytrace_shape_buffer.device = m_vulkan_device->logicalDevice;
-        out.raytrace_material_buffer.device = m_vulkan_device->logicalDevice;
-        out.raytrace_RNG_buffer.device = m_vulkan_device->logicalDevice;
-
-        out.index_buffer.destroy();
-        out.raytrace_shape_buffer.destroy();
-        out.raytrace_material_buffer.destroy();
-        out.raytrace_RNG_buffer.destroy();
-    }
-
-    void VkSceneController::CreateDescriptorSets(VkScene& out) const
-    {
-        auto& device = m_vulkan_device->logicalDevice;
-        // Generate descriptor sets for all meshes
-        // todo : think about a nicer solution, better suited per material?
-
-        // Descriptor pool
-        std::vector<VkDescriptorPoolSize> poolSizes;
-        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, static_cast<uint32_t>(out.meshes.size())));
-        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, out.meshes.size()));
-        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<uint32_t>(out.meshes.size() * 4)));
-        poolSizes.push_back(vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, static_cast<uint32_t>(10)));
-
-        VkDescriptorPoolCreateInfo descriptorPoolInfo =
-            vks::initializers::descriptorPoolCreateInfo(
-                static_cast<uint32_t>(poolSizes.size()),
-                poolSizes.data(),
-                static_cast<uint32_t>(out.meshes.size()));
-        if (out.descriptorPool)
-        {
-            vkDestroyDescriptorPool(device, out.descriptorPool, nullptr);
-        }
-        VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolInfo, nullptr, &out.descriptorPool));
-
-        // Shared descriptor set layout
-        std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings;
-        // Binding 0: UBO
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            0));
-        // Binding 1: Diffuse map
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            1));
-        // Binding 2: Roughness map
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            2));
-        // Binding 3: Bump map
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            3));
-        // Binding 4: Metallic map
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            4));
-        // Binding 5: transform matrices
-        setLayoutBindings.push_back(vks::initializers::descriptorSetLayoutBinding(
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            5));
-
-        VkDescriptorSetLayoutCreateInfo descriptorLayout =
-            vks::initializers::descriptorSetLayoutCreateInfo(
-                setLayoutBindings.data(),
-                static_cast<uint32_t>(setLayoutBindings.size()));
-
-        VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorLayout, nullptr, &out.descriptorSetLayout));
-
-        VkPipelineLayoutCreateInfo pPipelineLayoutCreateInfo =
-            vks::initializers::pipelineLayoutCreateInfo(
-                &out.descriptorSetLayout,
-                1);
-
-        VkPushConstantRange pushConstantRange = vks::initializers::pushConstantRange(VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(PushConsts), 0);
-        pPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-        pPipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-        VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pPipelineLayoutCreateInfo, nullptr, &out.pipelineLayout));
-
-        // Descriptor sets
-        for (uint32_t i = 0; i < out.meshes.size(); i++)
-        {
-            // Descriptor set
-            VkDescriptorSetAllocateInfo allocInfo =
-                vks::initializers::descriptorSetAllocateInfo(
-                    out.descriptorPool,
-                    &out.descriptorSetLayout,
-                    1);
-
-            // Background
-
-            VkResult r = vkAllocateDescriptorSets(device, &allocInfo, &out.meshes[i].descriptor_set);
-
-            VK_CHECK_RESULT(r);
-
-            std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-
-            // Binding 0 : Vertex shader uniform buffer
-            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-                out.meshes[i].descriptor_set,
-                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                0,
-                &m_defaultUBO->descriptor));
-            // Image bindings
-            // Binding 1: Color map
-            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-                out.meshes[i].descriptor_set,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                1,
-                &out.meshes[i].material->diffuse.descriptor));
-            // Binding 2: Roughness
-            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-                out.meshes[i].descriptor_set,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                2,
-                &out.meshes[i].material->roughness.descriptor));
-            // Binding 3: Normal
-            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-                out.meshes[i].descriptor_set,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                3,
-                &out.meshes[i].material->bump.descriptor));
-            // Binding 4: Metallic
-            writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
-                out.meshes[i].descriptor_set,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                4,
-                &out.meshes[i].material->metallic.descriptor));
-            // Binding 5 : Shape shader uniform buffer
+            //Binding 5: model transform
             writeDescriptorSets.push_back(vks::initializers::writeDescriptorSet(
                 out.meshes[i].descriptor_set,
                 VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                5,
+                10,
                 &out.mesh_transform_buf.descriptor));
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);

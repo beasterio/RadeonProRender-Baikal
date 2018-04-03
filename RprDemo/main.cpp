@@ -453,15 +453,15 @@ void InitProRender(const std::string& basepath, const std::string& filename)
 
         InitLight(light[0], RadeonRays::float3(23.8847504f, -16.0555954f, 5.01268339f),
             RadeonRays::float3(23.0653629f, -15.9814873f, 4.44425392f),
-            RadeonRays::float3(5000.0f, 5000.0f, 5000.0f));
+            RadeonRays::float3(15000.0f, 15000.0f, 15000.0f));
 
         InitLight(light[1], RadeonRays::float3(0.0f, height, 0.0f),
             RadeonRays::float3(-1.0f, height, 0.0f),
-            RadeonRays::float3(3000.0f, 3000.0f, 3000.0f));
+            RadeonRays::float3(13000.0f, 13000.0f, 13000.0f));
 
         InitLight(light[2], RadeonRays::float3(24.2759151f, -17.7952175f, -4.77304792f),
             RadeonRays::float3(23.3718319f, -17.5660172f, -4.41235495f),
-            RadeonRays::float3(5000.0f, 5000.0f, 5000.0f));
+            RadeonRays::float3(15000.0f, 15000.0f, 15000.0f));
 
         status = rprSceneAttachLight(scene, light[0]);
         assert(status == RPR_SUCCESS);

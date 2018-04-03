@@ -13,7 +13,7 @@
 class CubemapRender
 {
 public:
-    CubemapRender(vks::VulkanDevice* device, VkQueue queue, Baikal::VkScene& scene)
+    CubemapRender(vks::VulkanDevice* device, VkQueue queue, Baikal::VkScene const& scene)
         : _device(device)
         , _queue(queue) {
         using namespace vks::initializers;
@@ -59,8 +59,8 @@ public:
         }
 
         std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages = {
-            shader_list.Load("shaders/cubemap_render.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-            shader_list.Load("shaders/cubemap_render.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+            shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_render.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+            shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_render.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
         VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
         VkPipelineRasterizationStateCreateInfo rasterization_state = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
@@ -131,8 +131,8 @@ public:
             pipeline_layout_list.Set(_sky_forward_render_name, _sky_pipeline_layout);
 
             std::array<VkPipelineShaderStageCreateInfo, 2> sky_shader_stages = {
-                shader_list.Load("shaders/cubemap_sky.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-                shader_list.Load("shaders/cubemap_sky.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
+                shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_sky.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
+                shader_list.Load("../Baikal/Kernels/VK/shaders/cubemap_sky.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT) };
 
             VkPipelineInputAssemblyStateCreateInfo input_assembly_state = pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, 0, VK_FALSE);
             VkPipelineRasterizationStateCreateInfo rasterization_state = pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
@@ -273,7 +273,7 @@ public:
         return cubemap;
     }
 
-    void RenderSceneToCubemap(Baikal::VkScene& scene, glm::vec3 camera_pos, vks::TextureCubeMap& tex, std::vector<VkSemaphore>& semaphores) {
+    void RenderSceneToCubemap(Baikal::VkScene const& scene, glm::vec3 camera_pos, vks::TextureCubeMap& tex, std::vector<VkSemaphore>& semaphores) {
         if (!_cmd_buffer_write_initialized) {
             VkCommandBufferBeginInfo cmd_buf_info = vks::initializers::commandBufferBeginInfo();
 

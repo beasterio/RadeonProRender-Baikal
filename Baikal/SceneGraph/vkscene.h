@@ -70,11 +70,9 @@ namespace Baikal
 
     struct Vertex
     {
-        glm::vec3 pos;
-        glm::vec2 uv;
-        glm::vec3 color;
-        glm::vec3 normal;
-        glm::vec3 tangent;
+        glm::vec4 posUVx;
+        glm::vec4 normalUVy;
+        glm::vec4 tangent;
     };
 
     struct RaytraceVertex
@@ -143,10 +141,13 @@ namespace Baikal
 
         VkCamera camera;
 
-        ResourceManager* resources = nullptr;
+        ResourceManager* resources;
+        vks::VulkanDevice* vulkan_device;
+
         void InitResources(vks::VulkanDevice& device, VkQueue queue, const std::string& path)
         {
             asset_path = path;
+            vulkan_device = &device;
         }
 
         void Clear()
@@ -185,7 +186,7 @@ namespace Baikal
             vkCmdBindIndexBuffer(cmd_buf, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
             pushConsts.meshID[0] = 0;
-
+            uint32_t id = 0;
             for (auto mesh : meshes) {
                 if (mesh.material->has_alpha && (flags & SCENE_SKIP_ALPHA_OBJECTS))
                     continue;
@@ -196,12 +197,13 @@ namespace Baikal
                     pushConsts.baseRoughness = mesh.material->base_roughness;
                     pushConsts.baseMetallic = mesh.material->base_metallic;
 
+                    uint32_t offset = pushConsts.meshID[0] * static_cast<uint32_t>(transform_alignment);
                     if ((flags == SCENE_RENDER_ALL)) {
-                        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &mesh.descriptor_set, 0, NULL);
+                        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &mesh.descriptor_set, 1, &offset);
                         vkCmdPushConstants(cmd_buf, pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConsts), &pushConsts);
                     }
                     else {
-                        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, cubemapPipelineLayout, 0, 1, &mesh.descriptor_set, 0, NULL);
+                        vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS, cubemapPipelineLayout, 0, 1, &mesh.descriptor_set, 1, &offset);
                         vkCmdPushConstants(cmd_buf, cubemapPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(glm::vec4), sizeof(PushConsts), &pushConsts);
                     }
                 }
@@ -209,9 +211,10 @@ namespace Baikal
                 vkCmdDrawIndexed(cmd_buf, mesh.index_count, 1, mesh.index_base, 0, 0);
 
                 pushConsts.meshID[0]++;
+                //id = pushConsts.meshID[0] * vulkan_device->properties.limits.minUniformBufferOffsetAlignment;
+                id = 0;
             }
         }
-
 
         std::string asset_path;
 

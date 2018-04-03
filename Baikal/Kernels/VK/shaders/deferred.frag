@@ -524,7 +524,7 @@ void main()
         vec4 ray_dir = vec4(uv, -1.0f, 0.0f) * ubo.view;
         ray_dir.y = -ray_dir.y;
 
-        fragcolor += texture(samplerEnv, normalize(ray_dir.xyz)).rgb;     
+        //fragcolor += texture(samplerEnv, normalize(ray_dir.xyz)).rgb;     
     }
     else
     {
@@ -540,8 +540,11 @@ void main()
         vec3 indirectDiffuse = irradiance * albedo.xyz * (1.0f - inputs.metallic);
         vec3 indirectSpecular = reflection * (specAlbedo * brdf.x + brdf.y);
 
-        fragcolor += (indirectDiffuse + indirectSpecular) * ao;
+        //fragcolor += (indirectDiffuse + indirectSpecular) * ao;
+        //fragcolor += (indirectSpecular) * ao;
+        //fragcolor += vec3(0.f, 0.f, ao);
     }
 
-    outFragColor = fragcolor.xyzz;
+    outFragColor = vec4(fragcolor.xyz, 1.f);
+    //outFragColor = vec4(albedo.xy, 1.f);
 } 

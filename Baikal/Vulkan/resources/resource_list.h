@@ -8,7 +8,7 @@
 
 namespace
 {
-    const char* g_asset_path = "./../data/";
+    const char* g_asset_path = "../Resources/";
 }
 template <typename T>
 class ResourceList

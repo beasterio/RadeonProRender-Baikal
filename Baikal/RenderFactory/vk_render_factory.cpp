@@ -12,6 +12,18 @@ namespace Baikal
         : m_device(device)
     {
         rrInitInstance(m_device->logicalDevice, m_device->physicalDevice, m_device->computeCommandPool, &m_instance);
+        VkQueue queue;
+        vkGetDeviceQueue(m_device->logicalDevice, m_device->queueFamilyIndices.graphics, 0, &queue);
+        m_resources.reset(new ResourceManager(*m_device, queue));
+
+        TextureList& textures = m_resources->GetTextures();
+
+
+        // Add dummy textures for objects without texture
+        textures.addTexture2D(STATIC_CRC32("dummy.diffuse"), "../Resources/Textures/dummy.dds", VK_FORMAT_BC2_UNORM_BLOCK);
+        textures.addTexture2D(STATIC_CRC32("dummy.specular"), "../Resources/Textures/dummy_specular.dds", VK_FORMAT_BC2_UNORM_BLOCK);
+        textures.addTexture2D(STATIC_CRC32("dummy.bump"), "../Resources/Textures/dummy_ddn.dds", VK_FORMAT_BC2_UNORM_BLOCK);
+        textures.addTexture2D(STATIC_CRC32("dialectric.metallic"), "../Resources/Textures/Dielectric_metallic_TGA_BC2_1.DDS", VK_FORMAT_BC2_UNORM_BLOCK);
     }
 
     VkRenderFactory::~VkRenderFactory()
@@ -27,7 +39,7 @@ namespace Baikal
         {
             case RendererType::kUnidirectionalPathTracer:
             {
-                VkRenderer* renderer = new VkRenderer(m_device, &m_instance);
+                VkRenderer* renderer = new VkRenderer(m_device, &m_instance, m_resources.get());
                 m_offscreen_buffer = renderer->GetOffscreenBuffer();
 
                 return std::unique_ptr<Renderer<VkScene>>(renderer);
@@ -62,6 +74,6 @@ namespace Baikal
 
     std::unique_ptr<SceneController<VkScene>> VkRenderFactory::CreateSceneController() const
     {
-        return std::make_unique<VkSceneController>(m_device, m_instance, m_offscreen_buffer);
+        return std::make_unique<VkSceneController>(m_device, m_instance, m_offscreen_buffer, m_resources.get());
     }
 }
