@@ -58,6 +58,7 @@ namespace Baikal
         , m_rr_instance(instance)
         , m_frame_counter(0)
         , m_resources(resources)
+        , m_rte_instance(nullptr)
     {
         PrepareUniformBuffers();
         m_profiler = new GPUProfiler(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, 128);
@@ -68,7 +69,6 @@ namespace Baikal
         SetupDescriptorSetLayout();
         SetupVertexDescriptions();
 
-        rteInitInstance(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, m_vulkan_device->computeCommandPool, *m_rr_instance, RTE_EFFECT_AO, &m_rte_instance);
 
         VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
 
@@ -82,8 +82,6 @@ namespace Baikal
     {
         delete m_profiler;
         m_profiler = nullptr;
-
-        rteShutdownInstance(m_rte_instance);
     }
 
     // Renderer overrides
@@ -119,7 +117,6 @@ namespace Baikal
 
         if (shapes_changed || scene_changed || m_output_changed || textures_changed)
         {
-            SetupDescriptorSet(&scene);
         }
         if (shapes_changed || scene_changed || m_output_changed)
         {
@@ -128,78 +125,16 @@ namespace Baikal
 
         if (!m_shadow_pass)
         {
-            BuildDrawCommandBuffers();
-
-            auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
-            int width = vk_output->width();
-            int height = vk_output->height();
-            auto device = m_vulkan_device->logicalDevice;
-            VkQueue queue;
-            vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
-
-            TextureList& texture_list = m_resources->GetTextures();
-            texture_list.addCubemap(STATIC_CRC32("EnvMap"), "../Resources/Textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT);
-            m_irradiance_grid = new IrradianceGrid("../Resources/", m_vulkan_device, queue, scene);
-
-            // $tmp
-            //m_cubemap_render = new CubemapRender(m_vulkan_device, queue, scene);
-            //m_cubemap_prefilter = new CubemapPrefilter(GetAssetPath().c_str(), m_vulkan_device, queue, m_resources);
-
-            //m_cubemap = m_cubemap_render->CreateCubemap(m_cubemap_render->_cubemap_face_size, VK_FORMAT_R16G16B16A16_SFLOAT);
-            m_shadow_pass = new ShadowRenderPass(m_vulkan_device, m_resources);
-            m_gbuffer_pass = new GBufferRenderPass(m_vulkan_device, scene, width, height);
-            m_deferred_pass = new DeferredRenderPass(m_vulkan_device,
-                *m_gbuffer_pass,
-                *m_shadow_pass,
-                *m_irradiance_grid,
-                vk_output->framebuffers.draw_render_pass,
-                textures.filteredTraceResults.descriptor,
-                /*m_semaphores.render_complete*/ VK_NULL_HANDLE,
-                m_resources);
-
-            std::vector<VkSemaphore> dependencies = {};
-            std::vector<VkPipelineStageFlags> waitStageBits = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-            m_gbuffer_pass->SetDependencies(dependencies, waitStageBits);
-
-            m_shadow_pass->BuildCommandBuffer(scene);
-
-            DeferredRenderPass::BuildCommandBufferInfo deferred_pass_build_info = {
-                *m_gbuffer_pass
-                , vk_output->framebuffers.draw_render_pass
-                , vk_output->framebuffers.draw_fb
-                , m_command_buffers.drawCmdBuffers
-                , aoEnabled
-                , giEnabled
-                , false
-            };
-            m_deferred_pass->BuildCommandBuffer(deferred_pass_build_info);
-            m_irradiance_grid->Update();
-
-            InitRte(&scene);
-
-            vks::Framebuffer* g_buffer = m_gbuffer_pass->GetFrameBuffer();
-            VkDescriptorImageInfo g_buffer_attachments[3] = {
-                vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
-                vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[1].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
-                vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[2].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) };
-
-            std::vector<VkWriteDescriptorSet> writeDescriptorSets;
-            writeDescriptorSets =
-            {
-                // Binding 2 : Depth buffer, normals and mesh id
-                vks::initializers::writeDescriptorSet(
-                    m_descriptor_sets.bilateralFilter,
-                    VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    2,
-                    &g_buffer_attachments[0]),
-            };
-
-            vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+            InitPasses(scene);
         }
 
         if (shapes_changed || scene_changed || m_output_changed || textures_changed)
         {
             BuildCommandBuffers();
+            m_gbuffer_pass->BuildCommandBuffer(scene);
+            m_shadow_pass->BuildCommandBuffer(scene);
+
+            InitRte(&scene);
         }
 
         if (shapes_changed || m_output_changed || textures_changed)
@@ -230,6 +165,76 @@ namespace Baikal
 
     }
 
+    void VkRenderer::InitPasses(VkScene const& scene)
+    {
+        SetupDescriptorSet(&scene);
+
+        BuildDrawCommandBuffers();
+
+        auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
+        int width = vk_output->width();
+        int height = vk_output->height();
+        auto device = m_vulkan_device->logicalDevice;
+        VkQueue queue;
+        vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &queue);
+
+        TextureList& texture_list = m_resources->GetTextures();
+        texture_list.addCubemap(STATIC_CRC32("EnvMap"), "../Resources/Textures/hdr/pisa_cube.ktx", VK_FORMAT_R16G16B16A16_SFLOAT);
+        m_irradiance_grid = new IrradianceGrid("../Resources/", m_vulkan_device, queue, scene);
+
+        // $tmp
+        //m_cubemap_render = new CubemapRender(m_vulkan_device, queue, scene);
+        //m_cubemap_prefilter = new CubemapPrefilter(GetAssetPath().c_str(), m_vulkan_device, queue, m_resources);
+
+        //m_cubemap = m_cubemap_render->CreateCubemap(m_cubemap_render->_cubemap_face_size, VK_FORMAT_R16G16B16A16_SFLOAT);
+        m_shadow_pass = new ShadowRenderPass(m_vulkan_device, m_resources);
+        m_gbuffer_pass = new GBufferRenderPass(m_vulkan_device, scene, width, height);
+        m_deferred_pass = new DeferredRenderPass(m_vulkan_device,
+            *m_gbuffer_pass,
+            *m_shadow_pass,
+            *m_irradiance_grid,
+            vk_output->framebuffers.draw_render_pass,
+            textures.filteredTraceResults.descriptor,
+            /*m_semaphores.render_complete*/ VK_NULL_HANDLE,
+            m_resources);
+
+        std::vector<VkSemaphore> dependencies = {};
+        std::vector<VkPipelineStageFlags> waitStageBits = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        m_gbuffer_pass->SetDependencies(dependencies, waitStageBits);
+
+        m_shadow_pass->BuildCommandBuffer(scene);
+
+        DeferredRenderPass::BuildCommandBufferInfo deferred_pass_build_info = {
+            *m_gbuffer_pass
+            , vk_output->framebuffers.draw_render_pass
+            , vk_output->framebuffers.draw_fb
+            , m_command_buffers.drawCmdBuffers
+            , aoEnabled
+            , giEnabled
+            , false
+        };
+        m_deferred_pass->BuildCommandBuffer(deferred_pass_build_info);
+        m_irradiance_grid->Update();
+
+        vks::Framebuffer* g_buffer = m_gbuffer_pass->GetFrameBuffer();
+        VkDescriptorImageInfo g_buffer_attachments[3] = {
+            vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[0].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[1].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+            vks::initializers::descriptorImageInfo(g_buffer->sampler, g_buffer->attachments[2].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) };
+
+        std::vector<VkWriteDescriptorSet> writeDescriptorSets;
+        writeDescriptorSets =
+        {
+            // Binding 2 : Depth buffer, normals and mesh id
+            vks::initializers::writeDescriptorSet(
+                m_descriptor_sets.bilateralFilter,
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                2,
+                &g_buffer_attachments[0]),
+        };
+
+        vkUpdateDescriptorSets(device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+    }
 
     void VkRenderer::SetRandomSeed(std::uint32_t seed)
     {
@@ -372,461 +377,6 @@ namespace Baikal
 
         VK_CHECK_RESULT(vkQueueWaitIdle(graphics_queue));
     }
-
-    //void VkRenderer::BuildDeferredCommandBuffer(VkScene const* scene)
-    //{
-    //    auto& device = m_vulkan_device->logicalDevice;
-    //    auto vk_output = dynamic_cast<VkOutput*>(GetOutput(OutputType::kColor));
-    //    auto const& framebuffers = vk_output->framebuffers;
-    //    int width = vk_output->width();
-    //    int height = vk_output->height();
-    //    VkQueue graphics_queue;
-    //    vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.graphics, 0, &graphics_queue);
-    //    VkQueue compute_queue;
-    //    vkGetDeviceQueue(device, m_vulkan_device->queueFamilyIndices.compute, 0, &compute_queue);
-
-    //    uint32_t query_id = 0;
-
-    //    const uint32_t startGenerateAOQuery = query_id++;
-    //    const uint32_t endGenerateAOQuery = query_id++;
-    //    const uint32_t startGenerateGIRays = query_id++;
-    //    const uint32_t endGenerateGIRays = query_id++;
-    //    const uint32_t startAOResolve = query_id++;
-    //    const uint32_t endAOResolve = query_id++;
-    //    const uint32_t startGIResolve = query_id++;
-    //    const uint32_t endGIResolve = query_id++;
-    //    const uint32_t startAOBilateralFilter = query_id++;
-    //    const uint32_t endAOBilateralFilter = query_id++;
-    //    const uint32_t startGIBilateralFilter = query_id++;
-    //    const uint32_t endGIBilateralFilter = query_id++;
-
-    //    if (m_command_buffers.deferred == VK_NULL_HANDLE)
-    //    {
-    //        m_command_buffers.deferred = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
-    //    }
-
-    //    // Create a semaphore used to synchronize offscreen rendering and usage
-    //    VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
-    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_offscreen_semaphore));
-
-    //    VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-    //    VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-    //    std::array<VkClearValue, 4> clearValues = {};
-    //    VkViewport viewport;
-    //    VkRect2D scissor;
-
-    //    // Deferred calculations
-    //    // -------------------------------------------------------------------------------------------------------
-
-    //    vkBeginCommandBuffer(m_command_buffers.deferred, &cmdBufInfo);
-
-    //    // Clear values for all attachments written in the fragment sahder
-    //    clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-    //    clearValues[1].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-    //    clearValues[2].color = { { 0.0f, 0.0f, 0.0f, 0.0f } };
-    //    clearValues[3].depthStencil = { 1.0f, 0 };
-
-    //    renderPassBeginInfo.renderPass = framebuffers.deferred->renderPass;
-    //    renderPassBeginInfo.framebuffer = framebuffers.deferred->framebuffer;
-    //    renderPassBeginInfo.renderArea.extent.width = framebuffers.deferred->width;
-    //    renderPassBeginInfo.renderArea.extent.height = framebuffers.deferred->height;
-    //    renderPassBeginInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    //    renderPassBeginInfo.pClearValues = clearValues.data();
-
-    //    vkCmdBeginRenderPass(m_command_buffers.deferred, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    //    viewport = vks::initializers::viewport((float)framebuffers.deferred->width, (float)framebuffers.deferred->height, 0.0f, 1.0f);
-    //    vkCmdSetViewport(m_command_buffers.deferred, 0, 1, &viewport);
-
-    //    scissor = vks::initializers::rect2D(framebuffers.deferred->width, framebuffers.deferred->height, 0, 0);
-    //    vkCmdSetScissor(m_command_buffers.deferred, 0, 1, &scissor);
-
-    //    vkCmdBindPipeline(m_command_buffers.deferred, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.offscreen);
-    //    RenderScene(scene, m_command_buffers.deferred, false);
-    //    vkCmdEndRenderPass(m_command_buffers.deferred);
-
-    //    VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.deferred));
-
-    //    // Build shadow pass command buffers
-    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_shadow_semaphore));
-
-    //    for (int i = 0; i < LIGHT_COUNT; i++)
-    //    {
-    //        m_command_buffers.shadow[i] = m_vulkan_device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, false);
-
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-
-    //        VkClearValue clearValues[1];
-    //        clearValues[0].depthStencil = { 1.0f, 0 };
-
-    //        VkRenderPassBeginInfo renderPassBeginInfo = vks::initializers::renderPassBeginInfo();
-    //        renderPassBeginInfo.renderPass = framebuffers.shadow[i]->renderPass;
-    //        renderPassBeginInfo.framebuffer = framebuffers.shadow[i]->framebuffer;
-    //        renderPassBeginInfo.renderArea.offset.x = 0;
-    //        renderPassBeginInfo.renderArea.offset.y = 0;
-    //        renderPassBeginInfo.renderArea.extent.width = framebuffers.shadow[i]->width;
-    //        renderPassBeginInfo.renderArea.extent.height = framebuffers.shadow[i]->height;
-    //        renderPassBeginInfo.clearValueCount = 2;
-    //        renderPassBeginInfo.pClearValues = clearValues;
-
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.shadow[i], &cmdBufInfo));
-
-    //        VkViewport viewport = vks::initializers::viewport((float)framebuffers.shadow[i]->width, (float)framebuffers.shadow[i]->height, 0.0f, 1.0f);
-    //        vkCmdSetViewport(m_command_buffers.shadow[i], 0, 1, &viewport);
-
-    //        VkRect2D scissor = vks::initializers::rect2D(framebuffers.shadow[i]->width, framebuffers.shadow[i]->height, 0, 0);
-    //        vkCmdSetScissor(m_command_buffers.shadow[i], 0, 1, &scissor);
-
-    //        // Set depth bias (aka "Polygon offset")
-    //        // Required to avoid shadow mapping artefacts
-    //        vkCmdSetDepthBias(
-    //            m_command_buffers.shadow[i],
-    //            m_depth_bias_constant,
-    //            0.0f,
-    //            m_depth_bias_slope);
-
-    //        vkCmdBeginRenderPass(m_command_buffers.shadow[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    //        VkPipelineLayout pipelineLayout = m_pipeline_layouts.shadow;
-    //        vkCmdBindPipeline(m_command_buffers.shadow[i], VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelines.shadow);
-    //        vkCmdBindDescriptorSets(m_command_buffers.shadow[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &m_descriptor_sets.shadow, 0, NULL);
-
-    //        vkCmdPushConstants(m_command_buffers.shadow[i], pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(int), &i);
-
-    //        VkDeviceSize offsets[1] = { 0 };
-
-    //        // Render from global buffer using index offsets
-    //        vkCmdBindVertexBuffers(m_command_buffers.shadow[i], VERTEX_BUFFER_BIND_ID, 1, &scene->vertex_buffer.buffer, offsets);
-    //        vkCmdBindIndexBuffer(m_command_buffers.shadow[i], scene->index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    //        for (auto mesh : scene->meshes)
-    //        {
-    //            if (mesh.material->hasAlpha)
-    //            {
-    //                continue;
-    //            }
-    //            //vkCmdBindDescriptorSets(shadowmapPass.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, scene->pipelineLayout, 0, 1, &mesh.descriptorSet, 0, NULL);
-    //            //vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, 0, mesh.indexBase, 0);
-    //            vkCmdDrawIndexed(m_command_buffers.shadow[i], mesh.indexCount, 1, mesh.indexBase, 0, 0);
-
-    //        }
-
-    //        vkCmdEndRenderPass(m_command_buffers.shadow[i]);
-
-    //        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.shadow[i]));
-    //    }
-
-    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_trace_complete));
-    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_trace_complete[0]));
-    //    VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_trace_complete[1]));
-
-    //    VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo();
-    //    vkCreateFence(device, &fenceCreateInfo, nullptr, &fences.transferToHost);
-
-    //    // Build transfer to host cmd buffer
-    //    {
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_transfer_complete));
-
-    //        if (m_command_buffers.transferToHost == VK_NULL_HANDLE)
-    //        {
-    //            VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(m_vulkan_device->computeCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-    //            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.transferToHost));
-    //        }
-
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        vkBeginCommandBuffer(m_command_buffers.transferToHost, &cmdBufInfo);
-
-    //        VkBufferMemoryBarrier memBarries = vks::initializers::bufferMemoryBarrier();
-    //        memBarries.buffer = m_buffers.hitsLocal.buffer;
-    //        memBarries.offset = 0;
-    //        memBarries.size = m_buffers.hitsLocal.size;
-    //        memBarries.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    //        memBarries.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-    //        vkCmdPipelineBarrier(m_command_buffers.transferToHost, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &memBarries, 0, nullptr);
-
-    //        const uint32_t numRays = width * height;
-    //        const uint32_t hitBufferSize = numRays * sizeof(Hit);
-
-    //        VkBufferCopy cmdCopy = { 0, 0, hitBufferSize };
-    //        vkCmdCopyBuffer(m_command_buffers.transferToHost, m_buffers.hitsLocal.buffer, m_buffers.hitsStaging.buffer, 1, &cmdCopy);
-
-    //        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.transferToHost));
-    //    }
-
-    //    // Build AO cmd buffer
-    //    {
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_complete));
-
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.ao));
-
-    //        // Build command buffer
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.ao, &cmdBufInfo));
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.ao, startGenerateAOQuery);
-
-    //        vkCmdBindPipeline(m_command_buffers.ao, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.ao);
-    //        vkCmdBindDescriptorSets(m_command_buffers.ao, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.generateRays, 0, 1, &m_descriptor_sets.ao, 0, 0);
-
-    //        uint32_t groupSize = 16;
-    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
-
-    //        vkCmdDispatch(m_command_buffers.ao, groupCountX, groupCountY, 1);
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.ao, endGenerateAOQuery);
-
-    //        vkEndCommandBuffer(m_command_buffers.ao);
-    //    }
-
-    //    // Build GI cmd buffer
-    //    {
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_complete));
-
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.gi));
-
-    //        // Build command buffer
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.gi, &cmdBufInfo));
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.gi, startGenerateGIRays);
-
-    //        vkCmdBindPipeline(m_command_buffers.gi, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.gi);
-    //        vkCmdBindDescriptorSets(m_command_buffers.gi, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.generateRays, 0, 1, &m_descriptor_sets.gi, 0, 0);
-
-    //        uint32_t groupSize = 16;
-    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
-
-    //        vkCmdDispatch(m_command_buffers.gi, groupCountX, groupCountY, 1);
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.gi, endGenerateGIRays);
-
-    //        vkEndCommandBuffer(m_command_buffers.gi);
-    //    }
-
-    //    // Build AO resolve cmd buffer
-    //    {
-    //        static const int clearBuffer = 0;
-    //        static const int preserveBuffer = 1;
-
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_ao_resolve_complete));
-
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.aoResolve));
-
-    //        // Build command buffer for ao resolve
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.aoResolve, &cmdBufInfo));
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.aoResolve, startAOResolve);
-
-    //        vkCmdBindPipeline(m_command_buffers.aoResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.aoResolve);
-    //        vkCmdBindDescriptorSets(m_command_buffers.aoResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.aoResolve, 0, 1, &m_descriptor_sets.aoResolve, 0, 0);
-
-    //        vkCmdPushConstants(m_command_buffers.aoResolve, m_pipeline_layouts.aoResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &clearBuffer);
-
-    //        uint32_t groupSize = 16;
-    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
-
-    //        vkCmdDispatch(m_command_buffers.aoResolve, groupCountX, groupCountY, 1);
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.aoResolve, endAOResolve);
-
-    //        vkEndCommandBuffer(m_command_buffers.aoResolve);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.aoResolveAndClear));
-    //        // Build command buffer for ao resolve and clear
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.aoResolveAndClear, &cmdBufInfo));
-
-    //        vkCmdBindPipeline(m_command_buffers.aoResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.aoResolve);
-    //        vkCmdBindDescriptorSets(m_command_buffers.aoResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.aoResolve, 0, 1, &m_descriptor_sets.aoResolve, 0, 0);
-
-    //        vkCmdPushConstants(m_command_buffers.aoResolveAndClear, m_pipeline_layouts.aoResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &preserveBuffer);
-
-    //        vkCmdDispatch(m_command_buffers.aoResolveAndClear, groupCountX, groupCountY, 1);
-
-    //        vkEndCommandBuffer(m_command_buffers.aoResolveAndClear);
-    //    }
-
-    //    // Build GI resolve cmd buffer
-    //    {
-    //        static const int clearBuffer = 0;
-    //        static const int preserveBuffer = 1;
-
-    //        uint32_t groupSize = 16;
-    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
-
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_gi_resolve_complete));
-
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.giResolve));
-
-    //        // Build command buffer for ao resolve
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.giResolve, &cmdBufInfo));
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.giResolve, startGIResolve);
-
-    //        vkCmdBindPipeline(m_command_buffers.giResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.giResolve);
-    //        vkCmdBindDescriptorSets(m_command_buffers.giResolve, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.giResolve, 0, 1, &m_descriptor_sets.giResolve, 0, 0);
-
-    //        vkCmdPushConstants(m_command_buffers.giResolve, m_pipeline_layouts.giResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &clearBuffer);
-
-    //        vkCmdDispatch(m_command_buffers.giResolve, groupCountX, groupCountY, 1);
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.giResolve, endGIResolve);
-
-    //        vkEndCommandBuffer(m_command_buffers.giResolve);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.giResolveAndClear));
-    //        // Build command buffer for ao resolve and clear
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.giResolveAndClear, &cmdBufInfo));
-
-    //        vkCmdBindPipeline(m_command_buffers.giResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.giResolve);
-    //        vkCmdBindDescriptorSets(m_command_buffers.giResolveAndClear, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.giResolve, 0, 1, &m_descriptor_sets.giResolve, 0, 0);
-
-    //        vkCmdPushConstants(m_command_buffers.giResolveAndClear, m_pipeline_layouts.giResolve, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(int), &preserveBuffer);
-
-    //        vkCmdDispatch(m_command_buffers.giResolveAndClear, groupCountX, groupCountY, 1);
-
-    //        vkEndCommandBuffer(m_command_buffers.giResolveAndClear);
-    //    }
-
-    //    // Build GI filter cmd buffer
-    //    {
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_bilateral_filter_complete));
-
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilter));
-
-    //        uint32_t groupSize = 16;
-    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
-
-    //        // Build command buffer for ao resolve
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilter, &cmdBufInfo));
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, startGIBilateralFilter);
-
-    //        vkCmdBindPipeline(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
-    //        vkCmdBindDescriptorSets(m_command_buffers.bilateralFilter, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilter, 0, 0);
-
-    //        vkCmdDispatch(m_command_buffers.bilateralFilter, groupCountX, groupCountY, 1);
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilter, endGIBilateralFilter);
-
-    //        vkEndCommandBuffer(m_command_buffers.bilateralFilter);
-    //    }
-
-    //    // Build AO filter cmd buffer
-    //    {
-    //        VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &m_bilateral_filter_ao_complete));
-
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.bilateralFilterAO));
-
-    //        // Build command buffer for ao resolve
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        VK_CHECK_RESULT(vkBeginCommandBuffer(m_command_buffers.bilateralFilterAO, &cmdBufInfo));
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilterAO, startAOBilateralFilter);
-
-    //        vkCmdBindPipeline(m_command_buffers.bilateralFilterAO, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelines.bilateralFilter);
-    //        vkCmdBindDescriptorSets(m_command_buffers.bilateralFilterAO, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline_layouts.bilateralFilter, 0, 1, &m_descriptor_sets.bilateralFilterAO, 0, 0);
-
-    //        uint32_t groupSize = 16;
-    //        uint32_t groupCountX = (width + groupSize - 1) / groupSize;
-    //        uint32_t groupCountY = (height + groupSize - 1) / groupSize;
-
-    //        vkCmdDispatch(m_command_buffers.bilateralFilterAO, groupCountX, groupCountY, 1);
-
-    //        m_profiler->WriteTimestamp(m_command_buffers.bilateralFilterAO, endAOBilateralFilter);
-
-    //        vkEndCommandBuffer(m_command_buffers.bilateralFilterAO);
-    //    }
-
-    //    // Build transfer to host DBG cmd buffer
-    //    {
-    //        if (m_command_buffers.dbg_transferRaysToHost == VK_NULL_HANDLE)
-    //        {
-    //            VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(m_vulkan_device->computeCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-    //            VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.dbg_transferRaysToHost));
-    //        }
-
-    //        VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-    //        vkBeginCommandBuffer(m_command_buffers.dbg_transferRaysToHost, &cmdBufInfo);
-
-    //        VkBufferMemoryBarrier memBarries = vks::initializers::bufferMemoryBarrier();
-    //        memBarries.buffer = m_buffers.raysLocal.buffer;
-    //        memBarries.offset = 0;
-    //        memBarries.size = m_buffers.raysLocal.size;
-    //        memBarries.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-    //        memBarries.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-    //        vkCmdPipelineBarrier(m_command_buffers.dbg_transferRaysToHost, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &memBarries, 0, nullptr);
-
-    //        const uint32_t numRays = width * height;
-    //        const uint32_t rayBufferSize = numRays * sizeof(Ray);
-
-    //        VkBufferCopy cmdCopy = { 0, 0, rayBufferSize };
-    //        vkCmdCopyBuffer(m_command_buffers.dbg_transferRaysToHost, m_buffers.raysLocal.buffer, m_buffers.raysStaging.buffer, 1, &cmdCopy);
-
-    //        VK_CHECK_RESULT(vkEndCommandBuffer(m_command_buffers.dbg_transferRaysToHost));
-    //    }
-
-    //    // Build texture repack cmd buffer
-    //    {
-    //        VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-    //            vks::initializers::commandBufferAllocateInfo(
-    //                m_vulkan_device->computeCommandPool,
-    //                VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-    //                1);
-
-    //        VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &m_command_buffers.textureRepack));
-    //    }
-
-    //    uint32_t num_rays = width * height;
-    //    rrBindBuffers(*m_rr_instance, m_buffers.raysLocal.buffer, m_buffers.hitsLocal.buffer, num_rays);
-    //    auto status = rrTraceRays(*m_rr_instance, RR_QUERY_INTERSECT, num_rays, &m_command_buffers.traceRays);
-    //}
 
     void VkRenderer::RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow)
     {
@@ -1734,6 +1284,14 @@ namespace Baikal
         auto output = GetOutput(Baikal::OutputType::kColor);
         int height = output->height();
         int width = output->width();
+
+        if (m_rte_instance)
+        {
+            rteShutdownInstance(m_rte_instance);
+            m_rte_instance = nullptr;
+        }
+        rteInitInstance(m_vulkan_device->logicalDevice, m_vulkan_device->physicalDevice, m_vulkan_device->computeCommandPool, *m_rr_instance, RTE_EFFECT_AO, &m_rte_instance);
+
 
         rte_scene rteScene;
         rteScene.camera = m_uniform_buffers.fsLights.descriptor;

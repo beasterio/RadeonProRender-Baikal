@@ -100,6 +100,8 @@ namespace Baikal
         void BuildCommandBuffers();
 
         void RenderScene(VkScene const* scene, VkCommandBuffer cmdBuffer, bool shadow);
+        void InitPasses(VkScene const& scene);
+
         void PreparePipelines(VkScene const* scene);
         VkPipelineShaderStageCreateInfo LoadShader(std::string fileName, VkShaderStageFlagBits stage);
         void CreatePipelineCache();

@@ -20,6 +20,13 @@ namespace vks
 		int32_t validationLayerCount = 1;
 		const char *validationLayerNames[] = {
 			"VK_LAYER_LUNARG_standard_validation"
+//            "VK_LAYER_GOOGLE_threading",
+//            "VK_LAYER_LUNARG_parameter_validation",
+//            "VK_LAYER_LUNARG_object_tracker",
+//            "VK_LAYER_LUNARG_image",
+//            "VK_LAYER_LUNARG_core_validation",
+//            "VK_LAYER_LUNARG_swapchain",
+//            "VK_LAYER_GOOGLE_unique_objects"
 		};
 #else
 		// On Android we need to explicitly select all layers
@@ -120,7 +127,7 @@ namespace vks
 
 			VkDebugReportCallbackCreateInfoEXT dbgCreateInfo = {};
 			dbgCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
-			dbgCreateInfo.pfnCallback = (PFN_vkDebugReportCallbackEXT)messageCallback;
+ 			dbgCreateInfo.pfnCallback = (PFN_vkDebugReportCallbackEXT)messageCallback;
 			dbgCreateInfo.flags = flags;
 
 			VkResult err = CreateDebugReportCallback(
