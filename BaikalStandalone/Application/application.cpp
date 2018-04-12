@@ -538,6 +538,8 @@ namespace Baikal
                     //parse
                     AppCliParser cli;
                     auto cam_settings = cli.Parse(argv.size(), argv.data());
+                    cam_settings.height = m_settings.height;
+                    cam_settings.width = m_settings.width;
                     auto cam = dynamic_cast<PerspectiveCamera*>(m_cl->GetCamera().get());
 
                     //change camera
