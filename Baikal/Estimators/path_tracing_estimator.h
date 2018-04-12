@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include "estimator.h"
 #include "radeon_rays_cl.h"
+#include "Utils/cl_program_manager.h"
 
 #include <memory>
 
@@ -41,7 +42,7 @@ namespace Baikal
         PathTracingEstimator(
             CLWContext context,
             std::shared_ptr<RadeonRays::IntersectionApi> api,
-            std::string const& cache_path=""
+            const CLProgramManager *program_manager
         );
         
         ~PathTracingEstimator() override;
@@ -130,7 +131,8 @@ namespace Baikal
             QualityLevel quality,
             CLWBuffer<RadeonRays::float3> output,
             bool use_output_indices = true,
-            bool atomic_update = false
+            bool atomic_update = false,
+            MissedPrimaryRaysHandler missedPrimaryRaysHandler = nullptr
         ) override;
 
         /**
@@ -184,7 +186,7 @@ namespace Baikal
         bool SupportsIntermediateValue(IntermediateValue value) const override;
 
     private:
-        void InitPathData(std::size_t size);
+        void InitPathData(std::size_t size, int volume_idx);
 
         void ShadeSurface(
             ClwScene const& scene,
@@ -194,7 +196,7 @@ namespace Baikal
             bool use_output_indices
         );
 
-        void EvaluateVolume(
+        void SampleVolume(
             ClwScene const& scene,
             int pass,
             std::size_t size,
@@ -241,6 +243,17 @@ namespace Baikal
             CLWBuffer<RadeonRays::float3> output,
             bool use_output_indices
         );
+
+        void ApplyVolumeTransmission(
+            ClwScene const& scene,
+            int pass,
+            std::size_t size,
+            CLWBuffer<RadeonRays::float3> output,
+            bool use_output_indices
+        );
+
+
+        void AdvanceIterationCount(int pass, std::size_t size, CLWBuffer<RadeonRays::float3> output, bool use_output_indices);
 
         // Restore pixel indices after compaction
         void RestorePixelIndices(int pass, std::size_t size);

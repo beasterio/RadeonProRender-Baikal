@@ -114,6 +114,27 @@ namespace Baikal
         char* light_set = GetCmdOption(argv, argv + argc, "-light_set");
         s.light_set = light_set ? light_set : s.light_set;
 
+        char* camera_senor_size_x = GetCmdOption(argv, argv + argc, "-ssx");
+        s.camera_sensor_size.x = camera_senor_size_x ? (float)atof(camera_senor_size_x) : s.camera_sensor_size.x;
+
+        char* image_file_name = GetCmdOption(argv, argv + argc, "-ifn");
+        s.base_image_file_name = image_file_name ? image_file_name : s.base_image_file_name;
+
+        char* image_file_format = GetCmdOption(argv, argv + argc, "-iff");
+        s.image_file_format = image_file_format ? image_file_format : s.image_file_format;
+
+        char* camera_type = GetCmdOption(argv, argv + argc, "-ct");
+
+        if (camera_type)
+        {
+            if (strcmp(camera_type, "perspective") == 0)
+                s.camera_type = CameraType::kPerspective;
+            else if (strcmp(camera_type, "orthographic") == 0)
+                s.camera_type = CameraType::kOrthographic;
+            else
+                throw std::runtime_error("Unsupported camera type");
+        }
+
         char* interop = GetCmdOption(argv, argv + argc, "-interop");
         s.interop = interop ? (atoi(interop) > 0) : s.interop;
 
@@ -135,6 +156,19 @@ namespace Baikal
                 s.mode = ConfigManager::Mode::kUseGpus;
             else if (strcmp(cfg, "all") == 0)
                 s.mode = ConfigManager::Mode::kUseAll;
+        }
+
+
+        char* platform_index = GetCmdOption(argv, argv + argc, "-platform");
+        s.platform_index = platform_index ? (atoi(platform_index)) : s.platform_index;
+
+        char* device_index = GetCmdOption(argv, argv + argc, "-device");
+        s.device_index = device_index ? (atoi(device_index)) : s.device_index;
+
+        if ((s.device_index >= 0) && (s.platform_index < 0))
+        {
+            std::cout <<
+                "Can not set device index, because platform index was not specified" << std::endl;
         }
 
         if (aorays)
@@ -208,6 +242,7 @@ namespace Baikal
         , camera_aperture(0.f)
         , camera_focus_distance(1.f)
         , camera_focal_length(0.035f) // 35mm lens
+        , camera_type (CameraType::kPerspective)
 
         //output
         , camera_set("")
@@ -229,10 +264,17 @@ namespace Baikal
         , rt_benchmarked(false)
         , time_benchmark(false)
         , time_benchmark_time(0.f)
+
+        //imagefile
+        , base_image_file_name("out")
+        , image_file_format("png")
+
         //unused
         , num_shadow_rays(1)
         , samplecount(0)
         , envmapmul(1.f)
+        , platform_index(-1)
+        , device_index(-1)
     {
     }
 }

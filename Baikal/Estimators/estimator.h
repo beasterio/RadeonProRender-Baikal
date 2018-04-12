@@ -69,9 +69,14 @@ namespace Baikal
             float shadow_throughput;
         };
 
+        using MissedPrimaryRaysHandler = std::function<void(
+            CLWBuffer<ray> rays, CLWBuffer<Intersection> intersections, CLWBuffer<int> pixel_indices,
+            CLWBuffer<int> output_indices, std::size_t size, CLWBuffer<RadeonRays::float3> output)>;
+        
         Estimator(std::shared_ptr<RadeonRays::IntersectionApi> api)
             : m_intersector(api)
             , m_max_bounces(5u)
+            , m_max_shadow_ray_transmission_steps(2u)
         {
         }
 
@@ -211,7 +216,8 @@ namespace Baikal
             QualityLevel quality,
             CLWBuffer<RadeonRays::float3> output,
             bool use_output_indices = true,
-            bool atomic_update = false
+            bool atomic_update = false,
+            MissedPrimaryRaysHandler missedPrimaryRaysHandler = nullptr
         ) = 0;
 
         /**
@@ -262,8 +268,24 @@ namespace Baikal
         /**
         \brief Get max number of light bounces.
         */
-        std::uint32_t GetMaxBounces() {
+        std::uint32_t GetMaxBounces() const {
             return m_max_bounces;
+        }
+
+        /**
+        \brief Set max number of shadow ray steps through volumes (Transparent shadow).
+
+        \param num_steps
+        */
+        void SetMaxShadowRayTransmissionSteps(std::uint32_t num_steps) {
+            m_max_shadow_ray_transmission_steps = num_steps;
+        }
+
+        /**
+        \brief Get max number of shadow ray transmission steps.
+        */
+        std::uint32_t GetMaxShadowRayTransmissionSteps() const {
+            return m_max_shadow_ray_transmission_steps;
         }
 
         Estimator(Estimator const&) = delete;
@@ -272,6 +294,7 @@ namespace Baikal
     private:
         std::shared_ptr<RadeonRays::IntersectionApi> m_intersector;
         std::uint32_t m_max_bounces;
+        std::uint32_t m_max_shadow_ray_transmission_steps;
         std::array<CLWBuffer<float3>, 
             static_cast<size_t>(IntermediateValue::kMax)> m_intermediate_value;
     };

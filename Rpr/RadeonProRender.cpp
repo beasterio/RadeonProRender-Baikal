@@ -42,9 +42,43 @@ THE SOFTWARE.
 #define UNSUPPORTED_FUNCTION return RPR_SUCCESS;
 //#define UNSUPPORTED_FUNCTION return RPR_ERROR_UNSUPPORTED;
 
+static const std::map<rpr_material_node_input, std::string> kRPRInputStrings =
+{
+    { RPR_UBER_MATERIAL_DIFFUSE_COLOR, "uberv2.diffuse.color" },
+    { RPR_UBER_MATERIAL_LAYERS, "uberv2.layers" },
+    { RPR_UBER_MATERIAL_REFLECTION_COLOR, "uberv2.reflection.color" },
+    { RPR_UBER_MATERIAL_REFLECTION_ROUGHNESS, "uberv2.reflection.roughness" },
+    { RPR_UBER_MATERIAL_REFLECTION_ANISOTROPY, "uberv2.reflection.anisotropy" },
+    { RPR_UBER_MATERIAL_REFLECTION_ANISOTROPY_ROTATION, "uberv2.reflection.anisotropy_rotation" },
+    { RPR_UBER_MATERIAL_REFLECTION_IOR, "uberv2.reflection.ior" },
+    { RPR_UBER_MATERIAL_REFLECTION_METALNESS, "uberv2.reflection.metalness" },
+    { RPR_UBER_MATERIAL_REFRACTION_COLOR, "uberv2.refraction.color" },
+    { RPR_UBER_MATERIAL_REFRACTION_ROUGHNESS, "uberv2.refraction.roughness" },
+    { RPR_UBER_MATERIAL_REFRACTION_IOR, "uberv2.refraction.ior" },
+    { RPR_UBER_MATERIAL_REFRACTION_IOR_MODE, "uberv2.refraction.ior_mode" },
+    { RPR_UBER_MATERIAL_REFRACTION_THIN_SURFACE, "uberv2.refraction.thin_surface" },
+    { RPR_UBER_MATERIAL_COATING_COLOR, "uberv2.coating.color" },
+    { RPR_UBER_MATERIAL_COATING_IOR, "uberv2.coating.ior" },
+    { RPR_UBER_MATERIAL_EMISSION_COLOR, "uberv2.emission.color" },
+    { RPR_UBER_MATERIAL_EMISSION_WEIGHT, "uberv2.emission.weight" },
+    { RPR_UBER_MATERIAL_EMISSION_MODE, "uberv2.emission.mode" },
+    { RPR_UBER_MATERIAL_TRANSPARENCY, "uberv2.transparency" },
+    { RPR_UBER_MATERIAL_NORMAL, "uberv2.normal" },
+    { RPR_UBER_MATERIAL_BUMP, "uberv2.bump" },
+    { RPR_UBER_MATERIAL_DISPLACEMENT, "uberv2.displacement" },
+    { RPR_UBER_MATERIAL_SSS_ABSORPTION_COLOR, "uberv2.sss.absorption_color" },
+    { RPR_UBER_MATERIAL_SSS_SCATTER_COLOR, "uberv2.sss.scatter_color" },
+    { RPR_UBER_MATERIAL_SSS_ABSORPTION_DISTANCE, "uberv2.sss.absorption_distance" },
+    { RPR_UBER_MATERIAL_SSS_SCATTER_DISTANCE, "uberv2.sss.scatter_distance" },
+    { RPR_UBER_MATERIAL_SSS_SCATTER_DIRECTION, "uberv2.sss.scatter_direction" },
+    { RPR_UBER_MATERIAL_SSS_SUBSURFACE_COLOR, "uberv2.sss.subsurface_color" },
+    { RPR_UBER_MATERIAL_SSS_MULTISCATTER, "uberv2.sss.multiscatter" }
+};
+
+
 rpr_int rprRegisterPlugin(rpr_char const * path)
 {
-    UNIMLEMENTED_FUNCTION
+    UNSUPPORTED_FUNCTION
 }
 
 rpr_int rprCreateContext(rpr_int api_version, rpr_int * pluginIDs, size_t pluginCount, rpr_creation_flags creation_flags, rpr_context_properties const * props, rpr_char const * cache_path, rpr_context * out_context)
@@ -69,7 +103,7 @@ rpr_int rprCreateContext(rpr_int api_version, rpr_int * pluginIDs, size_t plugin
 
 rpr_int rprContextSetActivePlugin(rpr_context context, rpr_int pluginID)
 {
-    UNIMLEMENTED_FUNCTION
+    UNSUPPORTED_FUNCTION
 }
 
 rpr_int rprContextGetInfo(rpr_context in_context, rpr_context_info in_context_info, size_t in_size, void * out_data, size_t * out_size_ret)
@@ -629,7 +663,7 @@ rpr_int rprCameraGetInfo(rpr_camera in_camera, rpr_camera_info in_camera_info, s
     case RPR_CAMERA_MODE:
     {
         //TODO: only prespective camera supported now
-        rpr_camera_mode value = RPR_CAMERA_MODE_PERSPECTIVE;
+        rpr_camera_mode value = cam->GetMode();
         size_ret = sizeof(value);
         data.resize(size_ret);
         memcpy(&data[0], &value, size_ret);
@@ -685,14 +719,27 @@ rpr_int rprCameraGetInfo(rpr_camera in_camera, rpr_camera_info in_camera_info, s
         memcpy(&data[0], name.c_str(), size_ret);
         break;
     }
+    case RPR_CAMERA_ORTHO_WIDTH:
+    {
+        rpr_float value = cam->GetOrthoWidth();
+        size_ret = sizeof(value);
+        data.resize(size_ret);
+        memcpy(&data[0], &value, size_ret);
+        break;
+    }
+    case RPR_CAMERA_ORTHO_HEIGHT:
+    {
+        rpr_float value = cam->GetOrthoHeight();
+        size_ret = sizeof(value);
+        data.resize(size_ret);
+        memcpy(&data[0], &value, size_ret);
+        break;
+    }
     case RPR_CAMERA_APERTURE_BLADES:
     case RPR_CAMERA_EXPOSURE:
-    case RPR_CAMERA_ORTHO_WIDTH:
     case RPR_CAMERA_FOCAL_TILT:
     case RPR_CAMERA_IPD:
     case RPR_CAMERA_LENS_SHIFT:
-    case RPR_CAMERA_ORTHO_HEIGHT:
-
         UNSUPPORTED_FUNCTION
         break;
     default:
@@ -833,6 +880,8 @@ rpr_int rprCameraSetMode(rpr_camera in_camera, rpr_camera_mode mode)
     switch (mode)
     {
     case RPR_CAMERA_MODE_PERSPECTIVE:
+    case RPR_CAMERA_MODE_ORTHOGRAPHIC:
+        camera->SetMode(mode);
         break;
     default:
         UNIMLEMENTED_FUNCTION
@@ -841,9 +890,16 @@ rpr_int rprCameraSetMode(rpr_camera in_camera, rpr_camera_mode mode)
     return RPR_SUCCESS;
 }
 
-rpr_int rprCameraSetOrthoWidth(rpr_camera camera, rpr_float width)
+rpr_int rprCameraSetOrthoWidth(rpr_camera in_camera, rpr_float width)
 {
-    UNSUPPORTED_FUNCTION
+    CameraObject* camera = WrapObject::Cast<CameraObject>(in_camera);
+    if (!camera)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    camera->SetOrthoWidth(width);
+    return RPR_SUCCESS;
 }
 
 rpr_int rprCameraSetFocalTilt(rpr_camera camera, rpr_float tilt)
@@ -877,9 +933,17 @@ rpr_int rprCameraSetNearPlane(rpr_camera camera, rpr_float near)
     UNSUPPORTED_FUNCTION
 }
 
-rpr_int rprCameraSetOrthoHeight(rpr_camera camera, rpr_float height)
+rpr_int rprCameraSetOrthoHeight(rpr_camera in_camera, rpr_float height)
 {
-    UNSUPPORTED_FUNCTION
+    CameraObject* camera = WrapObject::Cast<CameraObject>(in_camera);
+    if (!camera)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    camera->SetOrthoHeight(height);
+    return RPR_SUCCESS;
+
 }
 
 rpr_int rprImageGetInfo(rpr_image in_image, rpr_image_info in_image_info, size_t in_size, void * in_data, size_t * in_size_ret)
@@ -1872,24 +1936,118 @@ rpr_int rprSceneGetInfo(rpr_scene in_scene, rpr_scene_info in_info, size_t in_si
     return RPR_SUCCESS;
 }
 
-rpr_int rprSceneGetEnvironmentOverride(rpr_scene scene, rpr_environment_override overrride, rpr_light * out_light)
+rpr_int rprSceneGetEnvironmentOverride(rpr_scene in_scene, rpr_environment_override overrride, rpr_light * out_light)
 {
-    UNSUPPORTED_FUNCTION
+    SceneObject* scene = WrapObject::Cast<SceneObject>(in_scene);
+
+    if (!scene)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    static const std::map<rpr_environment_override, SceneObject::OverrideType> override_type_conversion =
+    {
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_BACKGROUND, SceneObject::OverrideType::kBackground },
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_REFLECTION, SceneObject::OverrideType::kReflection },
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_REFRACTION, SceneObject::OverrideType::kRefraction },
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_TRANSPARENCY, SceneObject::OverrideType::kTransparency }
+    };
+
+    auto overryde_type = override_type_conversion.find(overrride);
+    if (overryde_type == override_type_conversion.end())
+        return RPR_ERROR_INVALID_PARAMETER;
+
+    try
+    {
+        *out_light = scene->GetEnvironmentOverride(overryde_type->second);
+    }
+    catch (Exception& e)
+    {
+        return e.m_error;
+    }
+
+    return RPR_SUCCESS;
 }
 
-rpr_int rprSceneSetEnvironmentOverride(rpr_scene scene, rpr_environment_override overrride, rpr_light light)
+rpr_int rprSceneSetEnvironmentOverride(rpr_scene in_scene, rpr_environment_override overrride, rpr_light in_light)
 {
-    UNSUPPORTED_FUNCTION
+    SceneObject* scene = WrapObject::Cast<SceneObject>(in_scene);
+    LightObject* light = WrapObject::Cast<LightObject>(in_light);
+
+    if (!scene)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    static const std::map<rpr_environment_override, SceneObject::OverrideType> override_type_conversion =
+    {
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_BACKGROUND, SceneObject::OverrideType::kBackground },
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_REFLECTION, SceneObject::OverrideType::kReflection },
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_REFRACTION, SceneObject::OverrideType::kRefraction },
+        { RPR_SCENE_ENVIRONMENT_OVERRIDE_TRANSPARENCY, SceneObject::OverrideType::kTransparency }
+    };
+
+    auto override_type = override_type_conversion.find(overrride);
+    if (override_type  == override_type_conversion.end())
+        return RPR_ERROR_INVALID_PARAMETER;
+
+    try
+    {
+        if ((overrride == RPR_SCENE_ENVIRONMENT_OVERRIDE_BACKGROUND) && light)
+            rprSceneSetBackgroundImage(scene, nullptr);
+
+        scene->SetEnvironmentOverride(override_type->second, light);
+    }
+    catch (Exception& e)
+    {
+        return e.m_error;
+    }
+
+    return RPR_SUCCESS;
 }
 
-rpr_int rprSceneSetBackgroundImage(rpr_scene scene, rpr_image image)
+rpr_int rprSceneSetBackgroundImage(rpr_scene in_scene, rpr_image in_image)
 {
-    UNSUPPORTED_FUNCTION
+    MaterialObject* img = WrapObject::Cast<MaterialObject>(in_image);
+    SceneObject* scene = WrapObject::Cast<SceneObject>(in_scene);
+    if (!scene)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    try
+    {
+        if (img)
+            rprSceneSetEnvironmentOverride(scene, RPR_SCENE_ENVIRONMENT_OVERRIDE_BACKGROUND, nullptr);
+        scene->SetBackgroundImage(img);
+    }
+    catch (Exception& e)
+    {
+        return e.m_error;
+    }
+    
+    return RPR_SUCCESS;
 }
 
-rpr_int rprSceneGetBackgroundImage(rpr_scene scene, rpr_image * out_image)
+rpr_int rprSceneGetBackgroundImage(rpr_scene in_scene, rpr_image * out_image)
 {
-    UNSUPPORTED_FUNCTION
+    SceneObject* scene = WrapObject::Cast<SceneObject>(in_scene);
+
+    if (!scene || !out_image)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    try
+    {
+        *out_image = scene->GetBackgroundImage();
+    }
+    catch (Exception& e)
+    {
+        return e.m_error;
+    }
+
+    return RPR_SUCCESS;
 }
 
 rpr_int rprSceneSetCamera(rpr_scene in_scene, rpr_camera in_camera)
@@ -2079,7 +2237,22 @@ rpr_int rprMaterialNodeSetInputF(rpr_material_node in_node, rpr_char const * in_
 
 rpr_int rprMaterialNodeSetInputU(rpr_material_node in_node, rpr_char const * in_input, rpr_uint in_value)
 {
-    UNSUPPORTED_FUNCTION
+    //cast
+    MaterialObject* mat = WrapObject::Cast<MaterialObject>(in_node);
+    if (!mat)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+
+    try
+    {
+        mat->SetInputValue(in_input, in_value);
+    }
+    catch (Exception& e)
+    {
+        return e.m_error;
+    }
+    return RPR_SUCCESS;
 }
 
 rpr_int rprMaterialNodeSetInputImageData(rpr_material_node in_node, rpr_char const * in_input, rpr_image in_image)
@@ -2340,4 +2513,40 @@ rpr_int rprShapeSetHeteroVolume(rpr_shape shape, rpr_hetero_volume heteroVolume)
 rpr_int rprHeteroVolumeSetTransform(rpr_hetero_volume out_heteroVolume, rpr_bool transpose, rpr_float const * transform)
 {
     UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprMaterialNodeSetInputN_ext(rpr_material_node in_node, rpr_material_node_input in_input, rpr_material_node in_input_node)
+{
+    auto name_it  = kRPRInputStrings.find(in_input);
+    return name_it != kRPRInputStrings.end() ?
+        rprMaterialNodeSetInputN(in_node, name_it->second.c_str(), in_input_node)
+        : RPR_ERROR_UNSUPPORTED;
+}
+rpr_int rprMaterialNodeSetInputF_ext(rpr_material_node in_node, rpr_material_node_input in_input, rpr_float in_value_x, rpr_float in_value_y, rpr_float in_value_z, rpr_float in_value_w)
+{
+    auto name_it = kRPRInputStrings.find(in_input);
+    return name_it != kRPRInputStrings.end() ? 
+        rprMaterialNodeSetInputF(in_node, name_it->second.c_str(), in_value_x, in_value_y, in_value_z, in_value_w)
+        : RPR_ERROR_UNSUPPORTED;
+}
+rpr_int rprMaterialNodeSetInputU_ext(rpr_material_node in_node, rpr_material_node_input in_input, rpr_uint in_value)
+{
+    auto name_it = kRPRInputStrings.find(in_input);
+    return name_it != kRPRInputStrings.end() ?
+        rprMaterialNodeSetInputU(in_node, name_it->second.c_str(), in_value)
+        : RPR_ERROR_UNSUPPORTED;
+}
+rpr_int rprMaterialNodeSetInputImageData_ext(rpr_material_node in_node, rpr_material_node_input in_input, rpr_image image)
+{
+    auto name_it = kRPRInputStrings.find(in_input);
+    return name_it != kRPRInputStrings.end() ?
+        rprMaterialNodeSetInputImageData(in_node, name_it->second.c_str(), image)
+        : RPR_ERROR_UNSUPPORTED;
+}
+rpr_int rprMaterialNodeSetInputBufferData_ext(rpr_material_node in_node, rpr_material_node_input in_input, rpr_buffer buffer)
+{
+    auto name_it = kRPRInputStrings.find(in_input);
+    return name_it != kRPRInputStrings.end() ?
+        rprMaterialNodeSetInputBufferData(in_node, name_it->second.c_str(), buffer)
+        : RPR_ERROR_UNSUPPORTED;
 }

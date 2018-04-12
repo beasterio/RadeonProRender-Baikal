@@ -54,6 +54,9 @@ THE SOFTWARE.
 #include <mutex>
 #include <fstream>
 #include <functional>
+#include <queue>
+
+#include <OpenImageIO/imageio.h>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -66,6 +69,7 @@ THE SOFTWARE.
 
 #include "math/mathutils.h"
 #include "Application/application.h"
+#include "material_io.h"
 
 using namespace RadeonRays;
 
@@ -75,8 +79,8 @@ namespace Baikal
     static bool     g_is_right_pressed = false;
     static bool     g_is_fwd_pressed = false;
     static bool     g_is_back_pressed = false;
-    static bool     g_is_home_pressed = false;
-    static bool     g_is_end_pressed = false;
+    static bool     g_is_climb_pressed = false;
+    static bool     g_is_descent_pressed = false;
     static bool     g_is_mouse_tracking = false;
     static bool     g_is_c_pressed = false;
     static bool     g_is_l_pressed = false;
@@ -86,6 +90,106 @@ namespace Baikal
     //ls - light set
     const std::string kLightLogFile("light.ls");
 
+    static bool     g_is_double_click = false;
+    static bool     g_is_f10_pressed = false;
+    static float2   g_scroll_delta = float2(0, 0);
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    Application::MaterialSelector::MaterialSelector(Material::Ptr root) :
+        m_root(root), m_current(m_root)
+    {  }
+
+    bool Application::MaterialSelector::IsRoot() const
+    { return (m_root == m_current); }
+
+    Material::Ptr Application::MaterialSelector::Get()
+    {
+        return m_current;
+    }
+
+    void Application::MaterialSelector::SelectMaterial(Material::Ptr material)
+    {
+        m_current = material;
+    }
+
+    void Application::MaterialSelector::GetParent()
+    {
+        if (m_root == m_current)
+        {
+            return;
+        }
+
+        std::queue<Material::Ptr> queue;
+        queue.push(m_root);
+
+        while (!queue.empty())
+        {
+            auto parent = queue.front();
+            for (size_t i = 0; i < queue.front()->GetNumInputs(); i++)
+            {
+                auto input = queue.front()->GetInput(i);
+
+                if (input.value.type == Material::InputType::kMaterial)
+                {
+                    if (input.value.mat_value == m_current)
+                    {
+                        m_current = parent;
+                        return;
+                    }
+                    queue.push(input.value.mat_value);
+                }
+            }
+            queue.pop();
+        }
+
+        return;
+    }
+
+    bool Application::InputSettings::HasMultiplier() const
+    { return m_multiplier.first; }
+
+    float Application::InputSettings::GetMultiplier() const
+    { return m_multiplier.second; }
+
+    void Application::InputSettings::SetMultiplier(float multiplier)
+    {
+        m_multiplier.first = true;
+        m_multiplier.second = multiplier;
+    }
+
+    RadeonRays::float3  Application::InputSettings::GetColor() const
+    { return m_color.second; }
+
+    void Application::InputSettings::SetColor(RadeonRays::float3  color)
+    {
+        m_color.first = true;
+        m_color.second = color;
+    }
+
+    std::uint32_t Application::InputSettings::GetInteger() const
+    { return m_integer_input.second; }
+
+    void Application::InputSettings::SetInteger(std::uint32_t integer)
+    {
+        m_integer_input.first= true;
+        m_integer_input.second = integer;
+    }
+
+    std::string Application::InputSettings::GetTexturePath() const
+    { return m_texture_path.second; }
+
+    void Application::InputSettings::SetTexturePath(std::string texture_path)
+    {
+        m_texture_path.first = true;
+        m_texture_path.second = texture_path;
+    }
+
+
+    void Application::MaterialSettings::Clear()
+    {
+        inputs_info.clear();
+    }
 
     void Application::OnMouseMove(GLFWwindow* window, double x, double y)
     {
@@ -94,6 +198,11 @@ namespace Baikal
             g_mouse_delta = float2((float)x, (float)y) - g_mouse_pos;
             g_mouse_pos = float2((float)x, (float)y);
         }
+    }
+
+    void Application::OnMouseScroll(GLFWwindow* window, double x, double y)
+    {
+        g_scroll_delta = float2((float)x, (float)y);
     }
 
     void Application::OnMouseButton(GLFWwindow* window, int button, int action, int mods)
@@ -115,30 +224,66 @@ namespace Baikal
                 g_mouse_delta = float2(0, 0);
             }
         }
+
+        if (button == GLFW_MOUSE_BUTTON_LEFT)
+        {
+            if (action == GLFW_PRESS)
+            {
+                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>
+                    (std::chrono::high_resolution_clock::now() - start);
+
+                if (duration.count() < 200)
+                {
+                    double x, y;
+                    glfwGetCursorPos(window, &x, &y);
+                    g_mouse_pos = float2((float)x, (float)y);
+                    g_mouse_delta = float2(0, 0);
+                    g_is_double_click = true;
+                }
+                start = std::chrono::high_resolution_clock::now();
+            }
+            else if (action == GLFW_RELEASE)
+                g_is_double_click = false;
+        }
     }
 
     void Application::OnKey(GLFWwindow* window, int key, int scancode, int action, int mods)
     {
+        ImGuiIO& io = ImGui::GetIO();
         Application* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
+        auto map = io.KeyMap;
+        const bool press_or_repeat = action == GLFW_PRESS || action == GLFW_REPEAT;
+
+        if (action == GLFW_PRESS)
+            io.KeysDown[key] = true;
+        if (action == GLFW_RELEASE)
+            io.KeysDown[key] = false;
+
+        (void)mods; // Modifiers are not reliable across systems
+        io.KeyCtrl = io.KeysDown[GLFW_KEY_LEFT_CONTROL] || io.KeysDown[GLFW_KEY_RIGHT_CONTROL];
+        io.KeyShift = io.KeysDown[GLFW_KEY_LEFT_SHIFT] || io.KeysDown[GLFW_KEY_RIGHT_SHIFT];
+        io.KeyAlt = io.KeysDown[GLFW_KEY_LEFT_ALT] || io.KeysDown[GLFW_KEY_RIGHT_ALT];
+        io.KeySuper = io.KeysDown[GLFW_KEY_LEFT_SUPER] || io.KeysDown[GLFW_KEY_RIGHT_SUPER];
+
         switch (key)
         {
-        case GLFW_KEY_UP:
-            g_is_fwd_pressed = action == GLFW_PRESS ? true : false;
+        case GLFW_KEY_W:
+            g_is_fwd_pressed = press_or_repeat;
             break;
-        case GLFW_KEY_DOWN:
-            g_is_back_pressed = action == GLFW_PRESS ? true : false;
+        case GLFW_KEY_S:
+            g_is_back_pressed = press_or_repeat;
             break;
-        case GLFW_KEY_LEFT:
-            g_is_left_pressed = action == GLFW_PRESS ? true : false;
+        case GLFW_KEY_A:
+            g_is_left_pressed = press_or_repeat;
             break;
-        case GLFW_KEY_RIGHT:
-            g_is_right_pressed = action == GLFW_PRESS ? true : false;
+        case GLFW_KEY_D:
+            g_is_right_pressed = press_or_repeat;
             break;
-        case GLFW_KEY_HOME:
-            g_is_home_pressed = action == GLFW_PRESS ? true : false;
+        case GLFW_KEY_Q:
+            g_is_climb_pressed = press_or_repeat;
             break;
-        case GLFW_KEY_END:
-            g_is_end_pressed = action == GLFW_PRESS ? true : false;
+        case GLFW_KEY_E:
+            g_is_descent_pressed = press_or_repeat;
             break;
         case GLFW_KEY_F1:
             app->m_settings.gui_visible = action == GLFW_PRESS ? !app->m_settings.gui_visible : app->m_settings.gui_visible;
@@ -151,6 +296,8 @@ namespace Baikal
             break;
         case GLFW_KEY_L:
             g_is_l_pressed = action == GLFW_RELEASE ? true : false;
+        case GLFW_KEY_F10:
+            g_is_f10_pressed = action == GLFW_PRESS;
             break;
         default:
             break;
@@ -169,18 +316,18 @@ namespace Baikal
         float camroty = 0.f;
 
         const float kMouseSensitivity = 0.001125f;
+        const float kScrollSensitivity = 0.05f;
         auto camera = m_cl->GetCamera();
         if (!m_settings.benchmark && !m_settings.time_benchmark)
         {
             float2 delta = g_mouse_delta * float2(kMouseSensitivity, kMouseSensitivity);
+            float2 scroll_delta = g_scroll_delta * float2(kScrollSensitivity, kScrollSensitivity);
             camrotx = -delta.x;
             camroty = -delta.y;
-
 
             if (std::abs(camroty) > 0.001f)
             {
                 camera->Tilt(camroty);
-                //g_camera->ArcballRotateVertically(float3(0, 0, 0), camroty);
                 update = true;
             }
 
@@ -188,11 +335,16 @@ namespace Baikal
             {
 
                 camera->Rotate(camrotx);
-                //g_camera->ArcballRotateHorizontally(float3(0, 0, 0), camrotx);
                 update = true;
             }
 
             const float kMovementSpeed = m_settings.cspeed;
+            if (std::abs(scroll_delta.y) > 0.001f)
+            {
+                camera->Zoom(scroll_delta.y * kMovementSpeed);
+                g_scroll_delta = float2();
+                update = true;
+            }
             if (g_is_fwd_pressed)
             {
                 camera->MoveForward((float)dt.count() * kMovementSpeed);
@@ -217,13 +369,13 @@ namespace Baikal
                 update = true;
             }
 
-            if (g_is_home_pressed)
+            if (g_is_climb_pressed)
             {
                 camera->MoveUp((float)dt.count() * kMovementSpeed);
                 update = true;
             }
 
-            if (g_is_end_pressed)
+            if (g_is_descent_pressed)
             {
                 camera->MoveUp(-(float)dt.count() * kMovementSpeed);
                 update = true;
@@ -234,11 +386,12 @@ namespace Baikal
             {
                 std::ofstream fs;
                 fs.open(m_settings.camera_out_folder + "/" + kCameraLogFile, std::ios::app);
+                PerspectiveCamera* pcam = dynamic_cast<PerspectiveCamera*>(camera.get());
                 RadeonRays::float3 cam_pos = camera->GetPosition();
                 RadeonRays::float3 cam_at = cam_pos + camera->GetForwardVector();
-                float aperture = camera->GetAperture();
-                float focus_dist = camera->GetFocusDistance();
-                float focal_length = camera->GetFocalLength();
+                float aperture = pcam->GetAperture();
+                float focus_dist = pcam->GetFocusDistance();
+                float focal_length = pcam->GetFocalLength();
                     //camera position
                 fs << " -cpx " << cam_pos.x
                     << " -cpy " << cam_pos.y
@@ -385,12 +538,12 @@ namespace Baikal
                     //parse
                     AppCliParser cli;
                     auto cam_settings = cli.Parse(argv.size(), argv.data());
-                    auto cam = m_cl->GetCamera();
-                    
+                    auto cam = dynamic_cast<PerspectiveCamera*>(m_cl->GetCamera().get());
+
                     //change camera
                     cam->LookAt(cam_settings.camera_pos,
-                                cam_settings.camera_at,
-                                cam_settings.camera_up);
+                        cam_settings.camera_at,
+                        cam_settings.camera_up);
 
                     // Adjust sensor size based on current aspect ratio
                     float aspect = (float)cam_settings.width / cam_settings.height;
@@ -412,6 +565,11 @@ namespace Baikal
                 {
                     exit(0);
                 }
+            }
+            if (g_is_f10_pressed)
+            {
+                g_is_f10_pressed = false; //one time execution
+                SaveToFile(time);
             }
         }
 
@@ -442,6 +600,41 @@ namespace Baikal
 
         m_cl->Update(m_settings);
     }
+
+    void Application::SaveToFile(std::chrono::high_resolution_clock::time_point time) const
+    {
+        using namespace OIIO;
+        int w, h;
+        glfwGetFramebufferSize(m_window, &w, &h);
+        assert(glGetError() == 0);
+        const auto channels = 3;
+        auto *data = new GLubyte[channels * w * h];
+        glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, data);
+
+        //opengl coordinates to oiio coordinates
+        for (auto i = 0; i <= h / 2; ++i)
+        {
+            std::swap_ranges(data + channels * w * i, data + channels * w * (i + 1) - 1, data + channels * w * (h - (i + 1)));
+        }
+        
+        const auto filename = m_settings.path + "/" + m_settings.base_image_file_name + "-" + std::to_string(time.time_since_epoch().count()) + "." + m_settings.image_file_format;
+        auto out = ImageOutput::create(filename);
+        if (out)
+        {
+            ImageSpec spec{ w, h, channels, TypeDesc::UINT8 };
+            out->open(filename, spec);
+            out->write_image(TypeDesc::UINT8, data);
+            out->close();
+            delete out; // ImageOutput::destroy not found
+        }
+        else
+        {
+            std::cout << "Wrong file format\n";
+        }
+        
+        delete[] data;
+    }
+
 
     void OnError(int error, const char* description)
     {
@@ -484,6 +677,7 @@ namespace Baikal
         , m_num_triangles(0)
         , m_num_instances(0)
         , m_aov_samples{}
+        , m_image_io(ImageIo::CreateImageIo())
     {
         // Command line parsing
         AppCliParser cli;
@@ -500,7 +694,7 @@ namespace Baikal
             // Initialize GLFW
             {
                 auto err = glfwInit();
-                if (err != GLFW_TRUE)
+                if (err != GL_TRUE)
                 {
                     std::cout << "GLFW initialization failed\n";
                     exit(-1);
@@ -555,6 +749,7 @@ namespace Baikal
                 glfwSetMouseButtonCallback(m_window, Application::OnMouseButton);
                 glfwSetCursorPosCallback(m_window, Application::OnMouseMove);
                 glfwSetKeyCallback(m_window, Application::OnKey);
+                glfwSetScrollCallback(m_window, Application::OnMouseScroll);
             }
             catch (std::runtime_error& err)
             {
@@ -637,6 +832,113 @@ namespace Baikal
         }
     }
 
+    bool Application::ReadFloatInput(Material::Ptr material, MaterialSettings& settings, std::uint32_t input_idx, std::string id_suffix)
+    {
+        auto input = material->GetInput(input_idx);
+        auto name = input.info.name;
+        auto input_info = settings.inputs_info[input_idx];
+        
+        if (!settings.inputs_info[input_idx].HasMultiplier())
+        {
+            auto mult = std::max(
+                std::max(input.value.float_value.x, input.value.float_value.y),
+                input.value.float_value.z);
+
+            mult = (mult > 1) ? (mult) : (1.f);
+
+            input_info.SetMultiplier(mult);
+
+            input_info.SetColor(RadeonRays::float3(
+                input.value.float_value.x / mult,
+                input.value.float_value.y / mult,
+                input.value.float_value.z / mult));
+
+            material->SetInputValue(input.info.name, input_info.GetColor());
+        }
+
+        auto mult = input_info.GetMultiplier();
+        float color[3] = { 0 };
+        auto input_color = input_info.GetColor();
+
+        color[0] = input_color.x;
+        color[1] = input_color.y;
+        color[2] = input_color.z;
+
+        if (!id_suffix.empty())
+            ImGui::PushID(id_suffix.c_str());
+
+        ImGui::InputFloat(name.c_str(), &mult, .0f, .0f, -1, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::ColorEdit3(name.c_str(), color);
+
+        if (!id_suffix.empty())
+            ImGui::PopID();
+
+        if ((input.value.tex_value == nullptr) &&
+            ((input_color.x != color[0]) ||
+             (input_color.y != color[1]) ||
+             (input_color.z != color[2]) ||
+             (input_info.GetMultiplier() != mult)))
+        {
+            RadeonRays::float4 value(
+                mult * color[0],
+                mult * color[1],
+                mult * color[2],
+                0);
+            input_info.SetColor(RadeonRays::float3(color[0], color[1], color[2]));
+            input_info.SetMultiplier(mult);
+            settings.inputs_info[input_idx] = input_info;
+            material->SetInputValue(input.info.name, value);
+            return true;
+        }
+        return false;
+    }
+
+    bool Application::ReadTextruePath(Material::Ptr material, MaterialSettings& settings, std::uint32_t input_idx)
+    {
+        const size_t buffer_size = 2048;
+        char text_buffer[buffer_size] = { 0 };
+        auto input = material->GetInput(input_idx);
+        auto name = input.info.name;
+
+        auto input_info = settings.inputs_info[input_idx];
+
+        if (input_info.GetTexturePath().empty() && 
+           (input.value.tex_value != nullptr))
+        {
+            strcpy(text_buffer, input.info.name.c_str());
+        }
+        else
+        {
+            strcpy(text_buffer, input_info.GetTexturePath().c_str());
+        }
+
+        if (ImGui::InputText((name + std::string("_texture")).c_str(), text_buffer, buffer_size, ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            Texture::Ptr texture = nullptr;
+            if (strlen(text_buffer) != 0)
+            {
+                try
+                {
+                    texture = m_image_io->LoadImage(text_buffer);
+                    material->SetInputValue(input.info.name, texture);
+                }
+                catch (std::exception&)
+                {
+                    printf("WARNING: Can not load texture by specified path\n");
+                }
+            }
+            else
+            {
+                material->SetInputValue(name, texture);
+            }
+            input_info.SetTexturePath(text_buffer);
+            settings.inputs_info[input_idx] = input_info;
+
+            return true;
+        }
+        return false;
+    }
+
     bool Application::UpdateGui()
     {
         static float aperture = 0.0f;
@@ -664,8 +966,8 @@ namespace Baikal
         {
             ImGui::SetNextWindowSizeConstraints(ImVec2(380, 580), ImVec2(380, 580));
             ImGui::Begin("Baikal settings");
-            ImGui::Text("Use arrow keys to move");
-            ImGui::Text("PgUp/Down to climb/descent");
+            ImGui::Text("Use wsad keys to move");
+            ImGui::Text("Q/E to climb/descent");
             ImGui::Text("Mouse+RMB to look around");
             ImGui::Text("C to log camera parameters");
             ImGui::Text("F1 to hide/show GUI");
@@ -680,30 +982,42 @@ namespace Baikal
             ImGui::Text("Number of instances: %d", m_num_instances);
             ImGui::Separator();
             ImGui::SliderInt("GI bounces", &num_bounces, 1, 10);
-            ImGui::SliderFloat("Aperture(mm)", &aperture, 0.0f, 100.0f);
-            ImGui::SliderFloat("Focal length(mm)", &focal_length, 5.f, 200.0f);
-            ImGui::SliderFloat("Focus distance(m)", &focus_distance, 0.05f, 20.f);
 
             auto camera = m_cl->GetCamera();
-            if (aperture != m_settings.camera_aperture * 1000.f)
-            {
-                m_settings.camera_aperture = aperture / 1000.f;
-                camera->SetAperture(m_settings.camera_aperture);
-                update = true;
-            }
 
-            if (focus_distance != m_settings.camera_focus_distance)
+            if (m_settings.camera_type == CameraType::kPerspective)
             {
-                m_settings.camera_focus_distance = focus_distance;
-                camera->SetFocusDistance(m_settings.camera_focus_distance);
-                update = true;
-            }
+                auto perspective_camera = std::dynamic_pointer_cast<PerspectiveCamera>(camera);
 
-            if (focal_length != m_settings.camera_focal_length * 1000.f)
-            {
-                m_settings.camera_focal_length = focal_length / 1000.f;
-                camera->SetFocalLength(m_settings.camera_focal_length);
-                update = true;
+                if (!perspective_camera)
+                {
+                    throw std::runtime_error("Application::UpdateGui(...): can not cast to perspective camera");
+                }
+
+                if (aperture != m_settings.camera_aperture * 1000.f)
+                {
+                    m_settings.camera_aperture = aperture / 1000.f;
+                    perspective_camera->SetAperture(m_settings.camera_aperture);
+                    update = true;
+                }
+
+                if (focus_distance != m_settings.camera_focus_distance)
+                {
+                    m_settings.camera_focus_distance = focus_distance;
+                    perspective_camera->SetFocusDistance(m_settings.camera_focus_distance);
+                    update = true;
+                }
+
+                if (focal_length != m_settings.camera_focal_length * 1000.f)
+                {
+                    m_settings.camera_focal_length = focal_length / 1000.f;
+                    perspective_camera->SetFocalLength(m_settings.camera_focal_length);
+                    update = true;
+                }
+
+                ImGui::SliderFloat("Aperture(mm)", &aperture, 0.0f, 100.0f);
+                ImGui::SliderFloat("Focal length(mm)", &focal_length, 5.f, 200.0f);
+                ImGui::SliderFloat("Focus distance(m)", &focus_distance, 0.05f, 20.f);
             }
 
             if (num_bounces != m_settings.num_bounces)
@@ -721,11 +1035,17 @@ namespace Baikal
                 update = true;
             }
 
+            RadeonRays::float3 eye, at;
+            eye = camera->GetPosition();
+            at = eye + camera->GetForwardVector();
+
             ImGui::Combo("Output", &output, outputs);
             ImGui::Text(" ");
             ImGui::Text("Number of samples: %d", m_settings.samplecount);
             ImGui::Text("Frame time %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
             ImGui::Text("Renderer performance %.3f Msamples/s", (ImGui::GetIO().Framerate *m_settings.width * m_settings.height) / 1000000.f);
+            ImGui::Text("Eye: x = %.3f y = %.3f z = %.3f", eye.x, eye.y, eye.z);
+            ImGui::Text("At: x = %.3f y = %.3f z = %.3f", at.x, at.y, at.z);
             ImGui::Separator();
 
             if (m_settings.time_benchmark)
@@ -809,6 +1129,224 @@ namespace Baikal
             }
 #endif
             ImGui::End();
+
+            // Get shape/material info from renderer
+            if (m_shape_id_future.valid())
+            {
+                m_current_shape_id = m_shape_id_future.get();
+                auto shape = m_cl->GetShapeById(m_current_shape_id);
+                m_material_selector = nullptr;
+
+                if (shape)
+                {
+                    // set basic material settings
+                    MaterialSettings material_settings;
+                    material_settings.id = m_current_shape_id;
+                    m_material_settings.push_back(material_settings);
+                    // set volume material settings
+                    if (shape->GetVolumeMaterial())
+                    {
+                        MaterialSettings volume_settings;
+                        volume_settings.id = m_current_shape_id;
+                        m_volume_settings.push_back(volume_settings);
+                    }
+
+                    m_material_selector = std::make_unique<MaterialSelector>(MaterialSelector(shape->GetMaterial()));
+                    m_object_name = shape->GetName();
+                }
+            }
+
+            // Process double click event if it occured
+            if (g_is_double_click)
+            {
+                m_shape_id_future = m_cl->GetShapeId((std::uint32_t)g_mouse_pos.x, (std::uint32_t)g_mouse_pos.y);
+                g_is_double_click = false;
+            }
+
+            // draw material props
+            if (m_material_selector)
+            {
+                ImGui::SetNextWindowSizeConstraints(ImVec2(380, 290), ImVec2(380, 290));
+                ImGui::Begin("Material info", 0, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+
+                if (!m_object_name.empty())
+                {
+                    ImGui::Text(m_object_name.c_str());
+                }
+
+                ImGui::Separator();
+                ImGui::Text("Material:");
+
+                bool is_scene_changed = false;
+
+                auto settings = std::find_if(m_material_settings.begin(), m_material_settings.end(),
+                    [&](const MaterialSettings& settings)
+                    {
+                        return (settings.id == m_current_shape_id);
+                    });
+
+                if (settings == m_material_settings.end())
+                    throw std::runtime_error(
+                        "Application::UpdateGui(...): there is no such shape id in material settings");
+
+                auto material = m_material_selector->Get();
+                for (size_t i = 0; i < material->GetNumInputs(); i++)
+                {
+                    ImGui::Separator();
+                    auto input = material->GetInput(i);
+
+                    if (settings->inputs_info.size() <= i)
+                    {
+                        settings->inputs_info.push_back(InputSettings());
+                    }
+
+                    auto input_info = settings->inputs_info[i];
+                    for (const auto& supported_type : input.info.supported_types)
+                    {
+                        auto name = input.info.name;
+                        switch (supported_type)
+                        {
+                            case Material::InputType::kFloat4:
+                            {
+                                auto result = ReadFloatInput(material, *settings, i);
+                                is_scene_changed = is_scene_changed ? is_scene_changed : result;
+                                break;
+                            }
+                            case Material::InputType::kTexture:
+                            {
+                                auto result = ReadTextruePath(material, *settings, i);
+                                is_scene_changed = is_scene_changed ? is_scene_changed : result;
+                                break;
+                            }
+                            case Material::InputType::kUint:
+                            {
+                                std::uint32_t input_value = input.value.uint_value;
+                                ImGui::InputInt(name.c_str(), (int*)(&input_value));
+
+                                if ((input.value.uint_value != input_value) &&
+                                    (input.value.tex_value == nullptr))
+                                {
+                                    settings->inputs_info[i].SetInteger(input_value);
+                                    material->SetInputValue(input.info.name, input_value);
+                                    is_scene_changed = true;
+                                }
+                                break;
+                            }
+                            case Material::InputType::kMaterial:
+                            {
+                                if (ImGui::Button((std::string("Into: ") + name).c_str()))
+                                {
+                                    m_material_selector->SelectMaterial(input.value.mat_value);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                ImGui::Separator();
+                if (!m_material_selector->IsRoot())
+                {
+                    if (ImGui::Button("Back"))
+                    {
+                        m_material_selector->GetParent();
+                    }
+                }
+
+                // Get material type settings
+                std::string material_info;
+                MaterialAccessor material_accessor(m_material_selector->Get());
+                for (const auto& iter : material_accessor.GetTypeInfo())
+                {
+                    material_info += iter;
+                    material_info.push_back('\0');
+                }
+
+                int material_type_output = material_accessor.GetType();
+                ImGui::Separator();
+                ImGui::Combo("Material type", &material_type_output, material_info.c_str());
+
+                if (material_accessor.GetType() != material_type_output)
+                {
+                    material_accessor.SetType(material_type_output);
+                    is_scene_changed = true;
+                }
+
+                // process volume materials
+                auto volume = m_cl->GetShapeById(m_current_shape_id)->GetVolumeMaterial();
+
+                auto volume_settings = std::find_if(m_volume_settings.begin(), m_volume_settings.end(),
+                    [&](const MaterialSettings& settings)
+                {
+                    return (settings.id == m_current_shape_id);
+                });
+
+                if (volume && volume_settings == m_volume_settings.end())
+                    throw std::runtime_error(
+                        "Application::UpdateGui(...): there is no volume settings");
+
+                if ((volume == nullptr) && (ImGui::Button("Create volume")))
+                {
+                    auto new_volume = VolumeMaterial::Create();
+
+                    new_volume->SetInputValue("absorption", RadeonRays::float4(.0f, .0f, .0f, .0f));
+                    new_volume->SetInputValue("scattering", RadeonRays::float4(.0f, .0f, .0f, .0f));
+                    new_volume->SetInputValue("emission", RadeonRays::float4(.0f, .0f, .0f, .0f));
+                    new_volume->SetInputValue("g", RadeonRays::float4(.0f, .0f, .0f, .0f));
+
+                    m_cl->GetShapeById(m_current_shape_id)->SetVolumeMaterial(new_volume);
+
+                    MaterialSettings volume_settings;
+                    volume_settings.id = m_current_shape_id;
+                    m_volume_settings.push_back(volume_settings);
+
+                    is_scene_changed = true;
+                }
+
+                ImGui::Separator();
+                if (ImGui::Button("Save materials"))
+                {
+                    auto material_io{ Baikal::MaterialIo::CreateMaterialIoXML() };
+                    material_io->SaveMaterialsFromScene(m_settings.path + "/materials.xml", *m_cl->GetScene());
+                    material_io->SaveIdentityMapping(m_settings.path + "/mapping.xml", *m_cl->GetScene());
+                }
+
+                if (volume != nullptr)
+                {
+                    ImGui::Separator();
+                    ImGui::Text("Volumes:");
+
+                    for (auto i = 0u; i < volume->GetNumInputs(); i++)
+                    {
+                        if (volume_settings->inputs_info.size() <= i)
+                        {
+                            volume_settings->inputs_info.push_back(InputSettings());
+                        }
+
+                        auto supported_types = volume->GetInput(i).info.supported_types;
+                        if (supported_types.find(Material::InputType::kFloat4) != supported_types.end())
+                        {
+                            auto result = ReadFloatInput(volume, *volume_settings, i, "volume");
+                            is_scene_changed = is_scene_changed ? is_scene_changed : result;
+                        }
+                    }
+
+                    if (ImGui::Button("Make world volume"))
+                    {
+                        m_cl->GetCamera()->SetVolume(volume);
+                        is_scene_changed = true;
+                    }
+                }
+
+                ImGui::End();
+
+                if (is_scene_changed)
+                {
+                    m_cl->UpdateScene();
+                }
+            }
+
+
             ImGui::Render();
         }
 
@@ -831,7 +1369,7 @@ namespace Baikal
 
                 if (mesh)
                 {
-                    m_num_triangles += mesh->GetNumIndices() / 3;
+                    m_num_triangles += (int)(mesh->GetNumIndices() / 3);
                 }
                 else
                 {

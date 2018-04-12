@@ -27,10 +27,9 @@ THE SOFTWARE.
 #include "SceneGraph/scene1.h"
 #include "SceneGraph/camera.h"
 #include "SceneGraph/material.h"
-#include "SceneGraph/IO/scene_io.h"
-#include "SceneGraph/IO/image_io.h"
-
-#include "SceneGraph/IO/material_io.h"
+#include "scene_io.h"
+#include "image_io.h"
+#include "material_io.h"
 #include "SceneGraph/material.h"
 
 #include "Renderers/monte_carlo_renderer.h"
@@ -43,7 +42,9 @@ THE SOFTWARE.
 #include <chrono>
 #include <cmath>
 
+#ifdef ENABLE_DENOISER
 #include "PostEffects/wavelet_denoiser.h"
+#endif
 #include "Utils/clw_class.h"
 
 
@@ -62,7 +63,13 @@ namespace Baikal
         //create cl context
         try
         {
-            ConfigManager::CreateConfigs(settings.mode, settings.interop, m_cfgs, settings.num_bounces);
+            ConfigManager::CreateConfigs(
+                settings.mode,
+                settings.interop,
+                m_cfgs,
+                settings.num_bounces,
+                settings.platform_index,
+                settings.device_index);
         }
         catch (CLWException &)
         {
@@ -70,6 +77,8 @@ namespace Baikal
             ConfigManager::CreateConfigs(settings.mode, false, m_cfgs, settings.num_bounces);
         }
 
+        m_width = (std::uint32_t)settings.width;
+        m_height = (std::uint32_t)settings.height;
 
         std::cout << "Running on devices: \n";
 
@@ -122,13 +131,15 @@ namespace Baikal
 #pragma omp parallel for
         for (int i = 0; i < m_cfgs.size(); ++i)
         {
-            m_outputs[i].output = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);
+            m_outputs[i].output = m_cfgs[i].factory->CreateOutput(m_width, m_height);
 
 #ifdef ENABLE_DENOISER
             m_outputs[i].output_denoised = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);
             m_outputs[i].output_normal = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);
             m_outputs[i].output_position = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);
-            m_outputs[i].output_albedo = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);	
+            m_outputs[i].output_albedo = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);
+            m_outputs[i].output_mesh_id = m_cfgs[i].factory->CreateOutput(settings.width, settings.height);
+
             //m_outputs[i].denoiser = m_cfgs[i].factory->CreatePostEffect(Baikal::RenderFactory<Baikal::ClwScene>::PostEffectType::kBilateralDenoiser);
             m_outputs[i].denoiser = m_cfgs[i].factory->CreatePostEffect(Baikal::RenderFactory<Baikal::ClwScene>::PostEffectType::kWaveletDenoiser);
 #endif
@@ -138,6 +149,7 @@ namespace Baikal
             m_cfgs[i].renderer->SetOutput(Baikal::Renderer::OutputType::kWorldShadingNormal, m_outputs[i].output_normal.get());
             m_cfgs[i].renderer->SetOutput(Baikal::Renderer::OutputType::kWorldPosition, m_outputs[i].output_position.get());
             m_cfgs[i].renderer->SetOutput(Baikal::Renderer::OutputType::kAlbedo, m_outputs[i].output_albedo.get());
+            m_cfgs[i].renderer->SetOutput(Baikal::Renderer::OutputType::kMeshID, m_outputs[i].output_mesh_id.get());
 #endif
 
             m_outputs[i].fdata.resize(settings.width * settings.height);
@@ -145,11 +157,13 @@ namespace Baikal
 
             if (m_cfgs[i].type == ConfigManager::kPrimary)
             {
-                m_outputs[i].copybuffer = m_cfgs[i].context.CreateBuffer<RadeonRays::float3>(settings.width * settings.height, CL_MEM_READ_WRITE);
+                m_outputs[i].copybuffer = m_cfgs[i].context.CreateBuffer<RadeonRays::float3>(m_width * m_height, CL_MEM_READ_WRITE);
             }
         }
 
+        m_shape_id_data.output = m_cfgs[m_primary].factory->CreateOutput(m_width, m_height);
         m_cfgs[m_primary].renderer->Clear(RadeonRays::float3(0, 0, 0), *m_outputs[m_primary].output);
+        m_cfgs[m_primary].renderer->Clear(RadeonRays::float3(0, 0, 0), *m_shape_id_data.output);
     }
 
 
@@ -163,18 +177,9 @@ namespace Baikal
         std::string filename = basepath + settings.modelname;
 
         {
-            // Load OBJ scene
-            bool is_fbx = filename.find(".fbx") != std::string::npos;
-            bool is_gltf = filename.find(".gltf") != std::string::npos;
-            std::unique_ptr<Baikal::SceneIo> scene_io;
-            if (is_gltf)
-                scene_io = Baikal::SceneIo::CreateSceneIoGltf();
-            else
-                scene_io = is_fbx ? Baikal::SceneIo::CreateSceneIoFbx() : Baikal::SceneIo::CreateSceneIoObj();
-            auto scene_io1 = Baikal::SceneIo::CreateSceneIoTest();
-            m_scene = scene_io->LoadScene(filename, basepath);
 
-            // Enable this to generate new material mapping for a model
+            m_scene = Baikal::SceneIo::LoadScene(filename, basepath);
+            // Enable this to generate new materal mapping for a model
 #if 0
             auto material_io{Baikal::MaterialIo::CreateMaterialIoXML()};
             material_io->SaveMaterialsFromScene(basepath + "materials.xml", *m_scene);
@@ -198,10 +203,24 @@ namespace Baikal
             }
         }
 
-        m_camera = Baikal::PerspectiveCamera::Create(
-            settings.camera_pos
-            , settings.camera_at
-            , settings.camera_up);
+        switch (settings.camera_type)
+        {
+        case CameraType::kPerspective:
+            m_camera = Baikal::PerspectiveCamera::Create(
+                settings.camera_pos
+                , settings.camera_at
+                , settings.camera_up);
+
+            break;
+        case CameraType::kOrthographic:
+            m_camera = Baikal::OrthographicCamera::Create(
+                settings.camera_pos
+                , settings.camera_at
+                , settings.camera_up);
+            break;
+        default:
+            throw std::runtime_error("AppClRender::InitCl(...): unsupported camera type");
+        }
 
         m_scene->SetCamera(m_camera);
 
@@ -211,14 +230,21 @@ namespace Baikal
 
         m_camera->SetSensorSize(settings.camera_sensor_size);
         m_camera->SetDepthRange(settings.camera_zcap);
-        m_camera->SetFocalLength(settings.camera_focal_length);
-        m_camera->SetFocusDistance(settings.camera_focus_distance);
-        m_camera->SetAperture(settings.camera_aperture);
 
-        std::cout << "Camera type: " << (m_camera->GetAperture() > 0.f ? "Physical" : "Pinhole") << "\n";
-        std::cout << "Lens focal length: " << m_camera->GetFocalLength() * 1000.f << "mm\n";
-        std::cout << "Lens focus distance: " << m_camera->GetFocusDistance() << "m\n";
-        std::cout << "F-Stop: " << 1.f / (m_camera->GetAperture() * 10.f) << "\n";
+        auto perspective_camera = std::dynamic_pointer_cast<Baikal::PerspectiveCamera>(m_camera);
+
+        // if camera mode is kPerspective
+        if (perspective_camera)
+        {
+            perspective_camera->SetFocalLength(settings.camera_focal_length);
+            perspective_camera->SetFocusDistance(settings.camera_focus_distance);
+            perspective_camera->SetAperture(settings.camera_aperture);
+            std::cout << "Camera type: " << (perspective_camera->GetAperture() > 0.f ? "Physical" : "Pinhole") << "\n";
+            std::cout << "Lens focal length: " << perspective_camera->GetFocalLength() * 1000.f << "mm\n";
+            std::cout << "Lens focus distance: " << perspective_camera->GetFocusDistance() << "m\n";
+            std::cout << "F-Stop: " << 1.f / (perspective_camera->GetAperture() * 10.f) << "\n";
+        }
+
         std::cout << "Sensor size: " << settings.camera_sensor_size.x * 1000.f << "x" << settings.camera_sensor_size.y * 1000.f << "mm\n";
 
         //load lights set
@@ -358,6 +384,7 @@ namespace Baikal
                 m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_normal);
                 m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_position);
                 m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_albedo);
+                m_cfgs[i].renderer->Clear(float3(0, 0, 0), *m_outputs[i].output_mesh_id);
 #endif
 
             }
@@ -468,11 +495,24 @@ namespace Baikal
 
         if (wavelet_denoiser != nullptr)
         {
-            wavelet_denoiser->Update(m_camera.get());
+            wavelet_denoiser->Update(static_cast<PerspectiveCamera*>(m_camera.get()));
         }
 #endif
         auto& scene = m_cfgs[m_primary].controller->GetCachedScene(m_scene);
         m_cfgs[m_primary].renderer->Render(scene);
+
+        if (m_shape_id_requested)
+        {
+            // offset in OpenCl memory till necessary item
+            auto offset = (std::uint32_t)(m_width * (m_height - m_shape_id_pos.y) + m_shape_id_pos.x);
+            // copy shape id elem from OpenCl
+            float4 shape_id;
+            m_shape_id_data.output->GetData((float3*)&shape_id, offset, 1);
+            m_promise.set_value(shape_id.x);
+            // clear output to stop tracking shape id map in openCl
+            m_cfgs[m_primary].renderer->SetOutput(Renderer::OutputType::kShapeId, nullptr);
+            m_shape_id_requested = false;
+        }
 
 #ifdef ENABLE_DENOISER
         Baikal::PostEffect::InputSet input_set;
@@ -480,7 +520,8 @@ namespace Baikal
         input_set[Baikal::Renderer::OutputType::kWorldShadingNormal] = m_outputs[m_primary].output_normal.get();
         input_set[Baikal::Renderer::OutputType::kWorldPosition] = m_outputs[m_primary].output_position.get();
         input_set[Baikal::Renderer::OutputType::kAlbedo] = m_outputs[m_primary].output_albedo.get();
-        
+        input_set[Baikal::Renderer::OutputType::kMeshID] = m_outputs[m_primary].output_mesh_id.get();
+
         auto radius = 10U - RadeonRays::clamp((sample_cnt / 16), 1U, 9U);
         auto position_sensitivity = 5.f + 10.f * (radius / 10.f);
 
@@ -625,7 +666,7 @@ namespace Baikal
                 update = true;
             }
 
-            auto& scene = m_cfgs[m_primary].controller->GetCachedScene(m_scene);
+            auto& scene = controller->GetCachedScene(m_scene);
             renderer->Render(scene);
 
             auto now = std::chrono::high_resolution_clock::now();
@@ -765,7 +806,41 @@ namespace Baikal
     }
 
 
-#ifdef ENABLE_DENOISER  
+    std::future<int> AppClRender::GetShapeId(std::uint32_t x, std::uint32_t y)
+    {
+        m_promise = std::promise<int>();
+        if (x >= m_width || y >= m_height)
+            throw std::logic_error(
+                "AppClRender::GetShapeId(...): x or y cords beyond the size of image");
+
+        if (m_cfgs.empty())
+            throw std::runtime_error("AppClRender::GetShapeId(...): config vector is empty");
+
+        // enable aov shape id output from OpenCl
+        m_cfgs[m_primary].renderer->SetOutput(
+            Renderer::OutputType::kShapeId, m_shape_id_data.output.get());
+        m_shape_id_pos = RadeonRays::float2((float)x, (float)y);
+        // request shape id from render
+        m_shape_id_requested = true;
+        return m_promise.get_future();
+    }
+
+    Baikal::Shape::Ptr AppClRender::GetShapeById(int shape_id)
+    {
+        if (shape_id < 0)
+            return nullptr;
+
+        // find shape in scene by its id
+        for (auto iter = m_scene->CreateShapeIterator(); iter->IsValid(); iter->Next())
+        {
+            auto shape = iter->ItemAs<Shape>();
+            if (shape->GetId() == shape_id)
+                return shape;
+        }
+        return nullptr;
+    }
+
+#ifdef ENABLE_DENOISER
     void AppClRender::SetDenoiserFloatParam(const std::string& name, const float4& value)
     {
         m_outputs[m_primary].denoiser->SetParameter(name, value);

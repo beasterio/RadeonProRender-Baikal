@@ -10,7 +10,7 @@
 
 #include "Utils/sobol.h"
 
-#ifdef RR_EMBED_KERNELS
+#ifdef BAIKAL_EMBED_KERNELS
 #include "./Kernels/CL/cache/kernels.h"
 #endif
 
@@ -73,9 +73,17 @@ namespace Baikal
     PathTracingEstimator::PathTracingEstimator(
         CLWContext context,
         std::shared_ptr<RadeonRays::IntersectionApi> api,
-        std::string const& cache_path
-    ) : 
-        ClwClass(context, "../Baikal/Kernels/CL/path_tracing_estimator.cl", "", cache_path)
+        const CLProgramManager *program_manager
+    ) :
+#ifdef BAIKAL_EMBED_KERNELS
+        ClwClass(context,
+            g_path_tracing_estimator_opencl,
+            g_path_tracing_estimator_opencl_inc,
+            sizeof(g_path_tracing_estimator_opencl_inc) / sizeof(*g_path_tracing_estimator_opencl_inc),
+            "", cache_path)
+#else
+        ClwClass(context, program_manager, "../Baikal/Kernels/CL/path_tracing_estimator.cl", "")
+#endif
         , Estimator(api)
         , m_sample_counter(0)
         , m_render_data(new RenderData)
@@ -168,7 +176,8 @@ namespace Baikal
         QualityLevel quality,
         CLWBuffer<RadeonRays::float3> output,
         bool use_output_indices,
-        bool atomic_update
+        bool atomic_update,
+        MissedPrimaryRaysHandler missedPrimaryRaysHandler
     )
     {
         if (atomic_update)
@@ -179,35 +188,44 @@ namespace Baikal
         auto has_visibility_buffer = HasIntermediateValueBuffer(IntermediateValue::kVisibility);
         auto visibility_buffer = GetIntermediateValueBuffer(IntermediateValue::kVisibility);
 
-        InitPathData(num_estimates);
+        InitPathData(num_estimates, scene.camera_volume_index);
 
-        GetContext().CopyBuffer(0u, m_render_data->iota, m_render_data->pixelindices[0], 0, 0, num_estimates); 
+        GetContext().CopyBuffer(0u, m_render_data->iota, m_render_data->pixelindices[0], 0, 0, num_estimates);
         GetContext().CopyBuffer(0u, m_render_data->iota, m_render_data->pixelindices[1], 0, 0, num_estimates);
 
         // Initialize first pass
         for (auto pass = 0u; pass < GetMaxBounces(); ++pass)
         {
             // Clear ray hits buffer
+            // TODO: make it a kernel
             GetContext().FillBuffer(
-                0, 
-                m_render_data->hits, 
-                0, 
+                0,
+                m_render_data->hits,
+                0,
                 m_render_data->hits.GetElementCount()
             );
 
             // Intersect ray batch
             GetIntersector()->QueryIntersection(
-                m_render_data->fr_rays[pass & 0x1], 
-                m_render_data->fr_hitcount, (std::uint32_t)num_estimates, 
-                m_render_data->fr_intersections, 
-                nullptr, 
+                m_render_data->fr_rays[pass & 0x1],
+                m_render_data->fr_hitcount, (std::uint32_t)num_estimates,
+                m_render_data->fr_intersections,
+                nullptr,
                 nullptr
             );
 
-            // Apply scattering
-            EvaluateVolume(scene, pass, num_estimates, output, use_output_indices);
 
-            if (pass > 0 && scene.envmapidx > -1)
+            // Apply scattering only if we have volumes
+            bool has_some_volume = scene.num_volumes > 0;
+
+            if (has_some_volume)
+            {
+                SampleVolume(scene, pass, num_estimates, output, use_output_indices);
+            }
+
+            bool has_some_environment = scene.envmapidx > -1;
+
+            if ((pass > 0) && has_some_environment)
             {
                 ShadeMiss(scene, pass, num_estimates, output, use_output_indices);
             }
@@ -217,10 +235,10 @@ namespace Baikal
 
             // Compact batch
             m_render_data->pp.Compact(
-                0, 
+                0,
                 m_render_data->hits,
-                m_render_data->iota, 
-                m_render_data->compacted_indices, 
+                m_render_data->iota,
+                m_render_data->compacted_indices,
                 (std::uint32_t)num_estimates,
                 m_render_data->hitcount
             );
@@ -228,23 +246,55 @@ namespace Baikal
             // Advance indices to keep pixel indices up to date
             RestorePixelIndices(pass, num_estimates);
 
-            // Shade hits
-            ShadeVolume(scene, pass, num_estimates, output, use_output_indices);
+            // Shade missing rays
+            if (pass == 0)
+            {
+                if (missedPrimaryRaysHandler)
+                    missedPrimaryRaysHandler(
+                        m_render_data->rays[0],
+                        m_render_data->intersections,
+                        m_render_data->pixelindices[1],
+                        use_output_indices ? m_render_data->output_indices : m_render_data->iota,
+                        num_estimates, output);
+                else if (scene.envmapidx > -1)
+                    ShadeBackground(scene, 0, num_estimates, output, use_output_indices);
+                else
+                    AdvanceIterationCount(0, num_estimates, output, use_output_indices);
+            }
+
+            if (has_some_volume)
+            {
+                // Shade hits
+                ShadeVolume(scene, pass, num_estimates, output, use_output_indices);
+            }
 
             // Shade hits
             ShadeSurface(scene, pass, num_estimates, output, use_output_indices);
 
-            // Shade missing rays
-            if (pass == 0)
-                ShadeBackground(scene, pass, num_estimates, output, use_output_indices);
+
+            if (has_some_volume && GetMaxShadowRayTransmissionSteps() > 0)
+            {
+                for (auto i = 0u; i < GetMaxShadowRayTransmissionSteps(); ++i)
+                {
+                    // Intersect ray batch
+                    GetIntersector()->QueryIntersection(m_render_data->fr_shadowrays,
+                                                        m_render_data->fr_hitcount,
+                                                        (std::uint32_t)num_estimates,
+                                                        m_render_data->fr_intersections,
+                                                        nullptr,
+                                                        nullptr);
+
+                    ApplyVolumeTransmission(scene, pass, num_estimates, output, use_output_indices);
+                }
+            }
 
             // Intersect shadow rays
             GetIntersector()->QueryOcclusion(
-                m_render_data->fr_shadowrays, 
-                m_render_data->fr_hitcount, 
+                m_render_data->fr_shadowrays,
+                m_render_data->fr_hitcount,
                 (std::uint32_t)num_estimates,
-                m_render_data->fr_shadowhits, 
-                nullptr, 
+                m_render_data->fr_shadowhits,
+                nullptr,
                 nullptr
             );
 
@@ -263,7 +313,7 @@ namespace Baikal
         ++m_sample_counter;
     }
 
-    void PathTracingEstimator::InitPathData(std::size_t size)
+    void PathTracingEstimator::InitPathData(std::size_t size, int volume_idx)
     {
         auto init_kernel = GetKernel("InitPathData");
 
@@ -271,6 +321,7 @@ namespace Baikal
         init_kernel.SetArg(argc++, m_render_data->pixelindices[0]);
         init_kernel.SetArg(argc++, m_render_data->pixelindices[1]);
         init_kernel.SetArg(argc++, m_render_data->hitcount);
+        init_kernel.SetArg(argc++, (cl_int)volume_idx);
         init_kernel.SetArg(argc++, m_render_data->paths);
 
         {
@@ -304,7 +355,6 @@ namespace Baikal
         shadekernel.SetArg(argc++, scene.uvs);
         shadekernel.SetArg(argc++, scene.indices);
         shadekernel.SetArg(argc++, scene.shapes);
-        shadekernel.SetArg(argc++, scene.materialids);
         shadekernel.SetArg(argc++, scene.materials);
         shadekernel.SetArg(argc++, scene.textures);
         shadekernel.SetArg(argc++, scene.texturedata);
@@ -323,6 +373,7 @@ namespace Baikal
         shadekernel.SetArg(argc++, m_render_data->paths);
         shadekernel.SetArg(argc++, m_render_data->rays[(pass + 1) & 0x1]);
         shadekernel.SetArg(argc++, output);
+        shadekernel.SetArg(argc++, scene.input_map_data);
 
         // Run shading kernel
         {
@@ -356,7 +407,6 @@ namespace Baikal
         shadekernel.SetArg(argc++, scene.uvs);
         shadekernel.SetArg(argc++, scene.indices);
         shadekernel.SetArg(argc++, scene.shapes);
-        shadekernel.SetArg(argc++, scene.materialids);
         shadekernel.SetArg(argc++, scene.materials);
         shadekernel.SetArg(argc++, scene.textures);
         shadekernel.SetArg(argc++, scene.texturedata);
@@ -382,7 +432,7 @@ namespace Baikal
         }
     }
 
-    void PathTracingEstimator::EvaluateVolume(
+    void PathTracingEstimator::SampleVolume(
         ClwScene const& scene,
         int pass,
         std::size_t size,
@@ -391,31 +441,31 @@ namespace Baikal
     )
     {
         // Fetch kernel
-        auto evalkernel = GetKernel("EvaluateVolume");
+        auto sample_kernel = GetKernel("SampleVolume");
 
         auto output_indices = use_output_indices ? m_render_data->output_indices : m_render_data->iota;
 
         // Set kernel parameters
         int argc = 0;
-        evalkernel.SetArg(argc++, m_render_data->rays[pass & 0x1]);
-        evalkernel.SetArg(argc++, m_render_data->pixelindices[(pass + 1) & 0x1]);
-        evalkernel.SetArg(argc++, output_indices);
-        evalkernel.SetArg(argc++, m_render_data->hitcount);
-        evalkernel.SetArg(argc++, scene.volumes);
-        evalkernel.SetArg(argc++, scene.textures);
-        evalkernel.SetArg(argc++, scene.texturedata);
-        evalkernel.SetArg(argc++, rand_uint());
-        evalkernel.SetArg(argc++, m_render_data->random);
-        evalkernel.SetArg(argc++, m_render_data->sobolmat);
-        evalkernel.SetArg(argc++, pass);
-        evalkernel.SetArg(argc++, m_sample_counter);
-        evalkernel.SetArg(argc++, m_render_data->intersections);
-        evalkernel.SetArg(argc++, m_render_data->paths);
-        evalkernel.SetArg(argc++, output);
+        sample_kernel.SetArg(argc++, m_render_data->rays[pass & 0x1]);
+        sample_kernel.SetArg(argc++, m_render_data->pixelindices[(pass + 1) & 0x1]);
+        sample_kernel.SetArg(argc++, output_indices);
+        sample_kernel.SetArg(argc++, m_render_data->hitcount);
+        sample_kernel.SetArg(argc++, scene.volumes);
+        sample_kernel.SetArg(argc++, scene.textures);
+        sample_kernel.SetArg(argc++, scene.texturedata);
+        sample_kernel.SetArg(argc++, rand_uint());
+        sample_kernel.SetArg(argc++, m_render_data->random);
+        sample_kernel.SetArg(argc++, m_render_data->sobolmat);
+        sample_kernel.SetArg(argc++, pass);
+        sample_kernel.SetArg(argc++, m_sample_counter);
+        sample_kernel.SetArg(argc++, m_render_data->intersections);
+        sample_kernel.SetArg(argc++, m_render_data->paths);
+        sample_kernel.SetArg(argc++, output);
 
         // Run shading kernel
         {
-            GetContext().Launch1D(0, ((size + 63) / 64) * 64, 64, evalkernel);
+            GetContext().Launch1D(0, ((size + 63) / 64) * 64, 64, sample_kernel);
         }
     }
 
@@ -478,6 +528,44 @@ namespace Baikal
         // Run shading kernel
         {
             GetContext().Launch1D(0, ((size + 63) / 64) * 64, 64, gatherkernel);
+        }
+    }
+
+    void PathTracingEstimator::ApplyVolumeTransmission(
+        ClwScene const& scene,
+        int pass,
+        std::size_t size,
+        CLWBuffer<RadeonRays::float3> output,
+        bool use_output_indices
+    )
+    {
+        // Fetch kernel
+        auto volumekernel = GetKernel("ApplyVolumeTransmission");
+
+        auto output_indices = use_output_indices ? m_render_data->output_indices : m_render_data->iota;
+
+        // Set kernel parameters
+        int argc = 0;
+        volumekernel.SetArg(argc++, m_render_data->pixelindices[pass & 0x1]);
+        volumekernel.SetArg(argc++, output_indices);
+        volumekernel.SetArg(argc++, m_render_data->shadowrays);
+        volumekernel.SetArg(argc++, m_render_data->hitcount);
+        volumekernel.SetArg(argc++, m_render_data->intersections);
+        volumekernel.SetArg(argc++, m_render_data->paths);
+        volumekernel.SetArg(argc++, scene.vertices);
+        volumekernel.SetArg(argc++, scene.normals);
+        volumekernel.SetArg(argc++, scene.uvs);
+        volumekernel.SetArg(argc++, scene.indices);
+        volumekernel.SetArg(argc++, scene.shapes);
+        volumekernel.SetArg(argc++, scene.materials);
+        volumekernel.SetArg(argc++, scene.volumes);
+        volumekernel.SetArg(argc++, m_render_data->lightsamples);
+        volumekernel.SetArg(argc++, m_render_data->shadowhits);
+        volumekernel.SetArg(argc++, output);
+
+        // Run shading kernel
+        {
+            GetContext().Launch1D(0, ((size + 63) / 64) * 64, 64, volumekernel);
         }
     }
 
@@ -579,6 +667,15 @@ namespace Baikal
     void PathTracingEstimator::SetRandomSeed(std::uint32_t seed)
     {
         std::srand(seed);
+
+        auto size = m_render_data->random.GetElementCount();
+
+        if (size != 0)
+        {
+            std::vector<std::uint32_t> random_buffer(size);
+            std::generate(random_buffer.begin(), random_buffer.end(), []() {return std::rand() + 3; });
+            GetContext().WriteBuffer(0, m_render_data->random, random_buffer.data(), size).Wait();
+        }
     }
 
     bool PathTracingEstimator::HasRandomBuffer(RandomBufferType buffer) const
@@ -619,7 +716,7 @@ namespace Baikal
         // Intersect ray batch
         GetIntersector()->QueryIntersection(
             m_render_data->fr_rays[0],
-            m_render_data->fr_hitcount, 
+            m_render_data->fr_hitcount,
             (std::uint32_t)num_estimates,
             m_render_data->fr_intersections,
             nullptr,
@@ -645,11 +742,11 @@ namespace Baikal
         for (auto i = 0u; i < num_passes; ++i)
         {
             GetIntersector()->QueryIntersection(
-                m_render_data->fr_rays[0], 
-                m_render_data->fr_hitcount, 
+                m_render_data->fr_rays[0],
+                m_render_data->fr_hitcount,
                 (std::uint32_t)num_estimates,
-                m_render_data->fr_intersections, 
-                nullptr, 
+                m_render_data->fr_intersections,
+                nullptr,
                 nullptr
             );
         }
@@ -658,9 +755,9 @@ namespace Baikal
 
         auto delta = std::chrono::high_resolution_clock::now() - start;
 
-        stats.primary_throughput = 
-            num_estimates / (((float)std::chrono::duration_cast<std::chrono::milliseconds>(delta).count() 
-                / num_passes) 
+        stats.primary_throughput =
+            num_estimates / (((float)std::chrono::duration_cast<std::chrono::milliseconds>(delta).count()
+                / num_passes)
                 / 1000.f);
 
         // Convert intersections to predicates
@@ -690,11 +787,11 @@ namespace Baikal
         for (auto i = 0U; i < num_passes; ++i)
         {
             GetIntersector()->QueryOcclusion(
-                m_render_data->fr_shadowrays, 
-                m_render_data->fr_hitcount, 
+                m_render_data->fr_shadowrays,
+                m_render_data->fr_hitcount,
                 (std::uint32_t)num_estimates,
-                m_render_data->fr_shadowhits, 
-                nullptr, 
+                m_render_data->fr_shadowhits,
+                nullptr,
                 nullptr);
         }
 
@@ -750,6 +847,27 @@ namespace Baikal
         else
         {
             return false;
+        }
+    }
+
+    void PathTracingEstimator::AdvanceIterationCount(
+        int pass,
+        std::size_t size,
+        CLWBuffer<RadeonRays::float3> output,
+        bool use_output_indices)
+    {
+        auto misskernel = GetKernel("AdvanceIterationCount");
+
+        auto output_indices = use_output_indices ? m_render_data->output_indices : m_render_data->iota;
+
+        int argc = 0;
+        misskernel.SetArg(argc++, m_render_data->pixelindices[(pass + 1) & 0x1]);
+        misskernel.SetArg(argc++, output_indices);
+        misskernel.SetArg(argc++, (cl_int)size);
+        misskernel.SetArg(argc++, output);
+
+        {
+            GetContext().Launch1D(0, ((size + 63) / 64) * 64, 64, misskernel);
         }
     }
 }

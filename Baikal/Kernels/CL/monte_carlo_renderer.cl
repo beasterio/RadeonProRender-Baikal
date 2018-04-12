@@ -629,8 +629,6 @@ KERNEL void FillAOVs(
     GLOBAL int const* restrict indices,
     // Shapes
     GLOBAL Shape const* restrict shapes,
-    // Material IDs
-    GLOBAL int const* restrict material_ids,
     // Materials
     GLOBAL Material const* restrict materials,
     // Textures
@@ -691,13 +689,23 @@ KERNEL void FillAOVs(
     int gloss_enabled,
     // Specularity map
     GLOBAL float4* restrict aov_gloss,
+	// Mesh_id enabled flag
+    int mesh_id_enabled,
+	// Mesh_id AOV
+    GLOBAL float4* restrict mesh_id,
     // Depth enabled flag
     int depth_enabled,
     // Depth map
     GLOBAL float4* restrict aov_depth,
+    // Shape id map enabled flag
+    int shape_ids_enabled,
+    // Shape id map stores shape ud in every pixel
+    // And negative number if there is no any shape in the pixel
+    GLOBAL float4* restrict aov_shape_ids,
     // NOTE: following are fake parameters, handled outside
     int visibility_enabled,
-    GLOBAL float4* restrict aov_visibility
+    GLOBAL float4* restrict aov_visibility,
+    GLOBAL InputMapData const* restrict input_map_values
 )
 {
     int global_id = get_global_id(0);
@@ -709,7 +717,6 @@ KERNEL void FillAOVs(
         uvs,
         indices,
         shapes,
-        material_ids,
         materials,
         lights,
         env_light_idx,
@@ -721,6 +728,9 @@ KERNEL void FillAOVs(
     {
         Intersection isect = isects[global_id];
         int idx = pixel_idx[global_id];
+
+        if (shape_ids_enabled)
+            aov_shape_ids[idx].x = -1;
 
         if (isect.shapeid > -1)
         {
@@ -756,8 +766,20 @@ KERNEL void FillAOVs(
                 bool backfacing = ngdotwi < 0.f;
 
                 // Select BxDF
+#ifdef ENABLE_UBERV2
+                UberV2ShaderData uber_shader_data;
+                if (diffgeo.mat.type == kUberV2)
+                {
+                    uber_shader_data = UberV2PrepareInputs(&diffgeo, input_map_values, TEXTURE_ARGS);
+                    GetMaterialBxDFType(wi, &sampler, SAMPLER_ARGS, &diffgeo, &uber_shader_data);
+                }
+                else
+                {
+                    Material_Select(&scene, wi, &sampler, TEXTURE_ARGS, SAMPLER_ARGS, &diffgeo);
+                }
+#else
                 Material_Select(&scene, wi, &sampler, TEXTURE_ARGS, SAMPLER_ARGS, &diffgeo);
-
+#endif
                 float s = Bxdf_IsBtdf(&diffgeo) ? (-sign(ngdotwi)) : 1.f;
                 if (backfacing && !Bxdf_IsBtdf(&diffgeo))
                 {
@@ -769,8 +791,18 @@ KERNEL void FillAOVs(
                     diffgeo.dpdu = -diffgeo.dpdu;
                     diffgeo.dpdv = -diffgeo.dpdv;
                 }
-
+#ifdef ENABLE_UBERV2
+                if (diffgeo.mat.type == kUberV2)
+                {
+                    UberV2_ApplyShadingNormal(&diffgeo, &uber_shader_data);
+                }
+                else
+                {
+                    DifferentialGeometry_ApplyBumpNormalMap(&diffgeo, TEXTURE_ARGS);
+                }
+#else
                 DifferentialGeometry_ApplyBumpNormalMap(&diffgeo, TEXTURE_ARGS);
+#endif
                 DifferentialGeometry_CalculateTangentTransforms(&diffgeo);
 
                 aov_world_shading_normal[idx].xyz += diffgeo.n;
@@ -922,7 +954,12 @@ KERNEL void FillAOVs(
                 aov_gloss[idx].xyz += gloss;
                 aov_gloss[idx].w += 1.f;
             }
-
+            
+            if (mesh_id_enabled)
+            {
+                mesh_id[idx] = make_float4(isect.shapeid, isect.shapeid, isect.shapeid, 1.f);
+            }
+            
             if (depth_enabled)
             {
                 float w = aov_depth[idx].w;
@@ -936,6 +973,11 @@ KERNEL void FillAOVs(
                     aov_depth[idx].xyz += isect.uvwt.w;
                     aov_depth[idx].w += 1.f;
                 }
+            }
+
+            if (shape_ids_enabled)
+            {
+                aov_shape_ids[idx].x = shapes[isect.shapeid - 1].id;
             }
         }
     }
@@ -1109,5 +1151,138 @@ KERNEL void EstimateVariance(
         }
     }
 }
+
+KERNEL
+void  OrthographicCamera_GeneratePaths(
+                                     // Camera
+                                     GLOBAL Camera const* restrict camera,
+                                     // Image resolution
+                                     int output_width,
+                                     int output_height,
+                                     // Pixel domain buffer
+                                     GLOBAL int const* restrict pixel_idx,
+                                     // Size of pixel domain buffer
+                                     GLOBAL int const* restrict num_pixels,
+                                     // RNG seed value
+                                     uint rng_seed,
+                                     // Current frame
+                                     uint frame,
+                                     // Rays to generate
+                                     GLOBAL ray* restrict rays,
+                                     // RNG data
+                                     GLOBAL uint* restrict random,
+                                     GLOBAL uint const* restrict sobol_mat
+                                     )
+{
+    int global_id = get_global_id(0);
+    
+    // Check borders
+    if (global_id < *num_pixels)
+    {
+        int idx = pixel_idx[global_id];
+        int y = idx / output_width;
+        int x = idx % output_width;
+        
+        // Get pointer to ray & path handles
+        GLOBAL ray* my_ray = rays + global_id;
+        
+        // Initialize sampler
+        Sampler sampler;
+#if SAMPLER == SOBOL
+        uint scramble = random[x + output_width * y] * 0x1fe3434f;
+        
+        if (frame & 0xF)
+        {
+            random[x + output_width * y] = WangHash(scramble);
+        }
+        
+        Sampler_Init(&sampler, frame, SAMPLE_DIM_CAMERA_OFFSET, scramble);
+#elif SAMPLER == RANDOM
+        uint scramble = x + output_width * y * rng_seed;
+        Sampler_Init(&sampler, scramble);
+#elif SAMPLER == CMJ
+        uint rnd = random[x + output_width * y];
+        uint scramble = rnd * 0x1fe3434f * ((frame + 133 * rnd) / (CMJ_DIM * CMJ_DIM));
+        Sampler_Init(&sampler, frame % (CMJ_DIM * CMJ_DIM), SAMPLE_DIM_CAMERA_OFFSET, scramble);
+#endif
+        
+        // Generate sample
+#ifndef BAIKAL_GENERATE_SAMPLE_AT_PIXEL_CENTER
+        float2 sample0 = Sampler_Sample2D(&sampler, SAMPLER_ARGS);
+#else
+        float2 sample0 = make_float2(0.5f, 0.5f);
+#endif
+        
+        // Calculate [0..1] image plane sample
+        float2 img_sample;
+        img_sample.x = (float)x / output_width + sample0.x / output_width;
+        img_sample.y = (float)y / output_height + sample0.y / output_height;
+        
+        // Transform into [-0.5, 0.5]
+        float2 h_sample = img_sample - make_float2(0.5f, 0.5f);
+        // Transform into [-dim/2, dim/2]
+        float2 c_sample = h_sample * camera->dim;
+        
+        // Calculate direction to image plane
+        my_ray->d.xyz = normalize(camera->forward);
+        // Origin == camera position + nearz * d
+        my_ray->o.xyz = camera->p + c_sample.x * camera->right + c_sample.y * camera->up;
+        // Max T value = zfar - znear since we moved origin to znear
+        my_ray->o.w = camera->zcap.y - camera->zcap.x;
+        // Generate random time from 0 to 1
+        my_ray->d.w = sample0.x;
+        // Set ray max
+        my_ray->extra.x = 0xFFFFFFFF;
+        my_ray->extra.y = 0xFFFFFFFF;
+        Ray_SetExtra(my_ray, 1.f);
+        Ray_SetMask(my_ray, VISIBILITY_MASK_PRIMARY);
+    }
+}
+
+///< Illuminate missing rays
+KERNEL void ShadeBackgroundImage(
+    // Ray batch
+    GLOBAL ray const* restrict rays,
+    // Intersection data
+    GLOBAL Intersection const* restrict isects,
+    // Pixel indices
+    GLOBAL int const* restrict pixel_indices,
+    // Output indices
+    GLOBAL int const*  restrict output_indices,
+    // Number of rays
+    int num_rays,
+    int background_idx,
+    // Output size
+    int width,
+    int height,
+    // Textures
+    TEXTURE_ARG_LIST,
+    // Output values
+    GLOBAL float4* restrict output
+)
+{
+    int global_id = get_global_id(0);
+
+    if (global_id < num_rays)
+    {
+        int pixel_idx = pixel_indices[global_id];
+        int output_index = output_indices[pixel_idx];
+
+        float x = (float)(output_index % width) / (float)width;
+        float y = (float)(output_index / width) / (float)height;
+
+        float4 v = make_float4(0.f, 0.f, 0.f, 1.f);
+
+        // In case of a miss
+        if (isects[global_id].shapeid < 0)
+        {
+            float2 uv = make_float2(x, y);
+            v.xyz = Texture_Sample2D(uv, TEXTURE_ARGS_IDX(background_idx)).xyz;
+        }
+        
+        ADD_FLOAT4(&output[output_index], v);
+    }
+}
+
 
 #endif // MONTE_CARLO_RENDERER_CL

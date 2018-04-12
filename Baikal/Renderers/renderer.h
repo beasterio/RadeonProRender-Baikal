@@ -51,7 +51,7 @@ namespace Baikal
     public:
         enum class OutputType
         {
-            kColor,
+            kColor = 0,
             kWorldPosition,
             kWorldShadingNormal,
             kViewShadingNormal,
@@ -62,7 +62,9 @@ namespace Baikal
             kWorldTangent,
             kWorldBitangent,
             kGloss,
+            kMeshID,
             kDepth,
+            kShapeId,
             kVisibility,
             kMax
         };
@@ -140,6 +142,7 @@ namespace Baikal
         auto idx = static_cast<std::size_t>(type);
         if (idx >= static_cast<std::size_t>(OutputType::kMax))
             throw std::out_of_range("Output type is out of supported range");
+
         m_outputs[idx] = output;
     }
 

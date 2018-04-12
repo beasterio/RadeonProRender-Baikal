@@ -4,8 +4,11 @@
 #include "Renderers/monte_carlo_renderer.h"
 #include "Renderers/adaptive_renderer.h"
 #include "Estimators/path_tracing_estimator.h"
+
+#ifdef ENABLE_DENOISER
 #include "PostEffects/bilateral_denoiser.h"
 #include "PostEffects/wavelet_denoiser.h"
+#endif
 
 #include <memory>
 
@@ -13,6 +16,8 @@ namespace Baikal
 {
     ClwRenderFactory::ClwRenderFactory(CLWContext context, std::string const& cache_path)
     : m_context(context)
+    , m_cache_path(cache_path)
+    , m_program_manager(cache_path)
     , m_intersector(
         CreateFromOpenClContext(
             context, 
@@ -21,7 +26,7 @@ namespace Baikal
         )
         , RadeonRays::IntersectionApi::Delete
     )
-    , m_cache_path(cache_path)
+    
     {
     }
 
@@ -35,8 +40,8 @@ namespace Baikal
                 return std::unique_ptr<Renderer>(
                     new MonteCarloRenderer(
                         m_context, 
-                        std::make_unique<PathTracingEstimator>(m_context, m_intersector, m_cache_path),
-                        m_cache_path
+                        &m_program_manager,
+                        std::make_unique<PathTracingEstimator>(m_context, m_intersector, &m_program_manager)
                         ));
             default:
                 throw std::runtime_error("Renderer not supported");
@@ -55,12 +60,14 @@ namespace Baikal
     {
         switch (type)
         {
+#ifdef ENABLE_DENOISER
             case PostEffectType::kBilateralDenoiser:
                 return std::unique_ptr<PostEffect>(
-                                            new BilateralDenoiser(m_context));
+                                            new BilateralDenoiser(m_context, &m_program_manager));
             case PostEffectType::kWaveletDenoiser:
                 return std::unique_ptr<PostEffect>(
-                                            new WaveletDenoiser(m_context));
+                                            new WaveletDenoiser(m_context, &m_program_manager));
+#endif
             default:
                 throw std::runtime_error("PostEffect not supported");
         }
@@ -68,6 +75,6 @@ namespace Baikal
 
     std::unique_ptr<SceneController<ClwScene>> ClwRenderFactory::CreateSceneController() const
     {
-        return std::make_unique<ClwSceneController>(m_context, m_intersector.get());
+        return std::make_unique<ClwSceneController>(m_context, m_intersector.get(), &m_program_manager);
     }
 }

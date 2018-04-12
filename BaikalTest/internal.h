@@ -21,7 +21,7 @@ THE SOFTWARE.
 ********************************************************************/
 #include "gtest/gtest.h"
 
-#include "Baikal/Utils/distribution1d.h"
+#include "Utils/distribution1d.h"
 #include "math/mathutils.h"
 
 class InternalTest : public ::testing::Test

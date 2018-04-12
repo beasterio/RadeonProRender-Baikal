@@ -28,7 +28,7 @@ THE SOFTWARE.
 #include "RenderFactory/clw_render_factory.h"
 #include "Output/output.h"
 #include "SceneGraph/camera.h"
-#include "SceneGraph/IO/scene_io.h"
+#include "scene_io.h"
 
 #include "OpenImageIO/imageio.h"
 
@@ -37,6 +37,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <cstdlib>
 #include <sstream>
+#include <iostream>
 
 extern int g_argc;
 extern char** g_argv;
@@ -79,9 +80,9 @@ public:
         {
             platform_index = 0;
 
-            for (auto j = 0; j < platforms.size(); ++j)
+            for (auto j = 0u; j < platforms.size(); ++j)
             {
-                for (auto i = 0; i < platforms[j].GetDeviceCount(); ++i)
+                for (auto i = 0u; i < platforms[j].GetDeviceCount(); ++i)
                 {
                     if (platforms[j].GetDevice(i).GetType() == CL_DEVICE_TYPE_GPU)
                     {
@@ -97,7 +98,7 @@ public:
         {
             device_index = 0;
 
-            for (auto i = 0; i < platforms[platform_index].GetDeviceCount(); ++i)
+            for (auto i = 0u; i < platforms[platform_index].GetDeviceCount(); ++i)
             {
                 if (platforms[platform_index].GetDevice(i).GetType() == CL_DEVICE_TYPE_GPU)
                 {
@@ -130,15 +131,19 @@ public:
     {
     }
 
-    virtual void ClearOutput() const
+    virtual void ClearOutput(Baikal::Output* optional_output = nullptr) const
     {
+        if (optional_output != nullptr)
+        {
+            ASSERT_NO_THROW(m_renderer->Clear(RadeonRays::float3(), *optional_output));
+        }
+
         ASSERT_NO_THROW(m_renderer->Clear(RadeonRays::float3(), *m_output));
     }
 
     virtual void LoadTestScene()
     {
-        auto io = Baikal::SceneIo::CreateSceneIoTest();
-        m_scene = io->LoadScene("sphere+ibl", "");
+        m_scene = Baikal::SceneIo::LoadScene("sphere+ibl.test", "");
     }
 
     virtual  void SetupCamera()
@@ -157,7 +162,7 @@ public:
         m_scene->SetCamera(m_camera);
     }
 
-    void SaveOutput(std::string const& file_name) const
+    void SaveOutput(std::string const& file_name, Baikal::Output* optional_output = nullptr) const
     {
         std::string path = m_generate ? m_reference_path : m_output_path;
         path.append(file_name);
@@ -169,7 +174,15 @@ public:
         auto height = m_output->height();
         std::vector<float3> data(width * height);
         std::vector<float3> data1(width * height);
-        m_output->GetData(&data[0]);
+
+        if (optional_output != nullptr)
+        {
+            optional_output->GetData(&data[0]);
+        }
+        else
+        {
+            m_output->GetData(&data[0]);
+        }
 
         for (auto y = 0u; y < height; ++y)
             for (auto x = 0u; x < width; ++x)
@@ -217,6 +230,23 @@ public:
         input->close();
 
         delete input;
+    }
+
+    void ApplyMaterialToObject(
+        std::string const& name,
+        Baikal::Material::Ptr material
+    )
+    {
+        for (auto iter = m_scene->CreateShapeIterator();
+            iter->IsValid();
+            iter->Next())
+        {
+            auto mesh = iter->ItemAs<Baikal::Mesh>();
+            if (mesh->GetName() == name)
+            {
+                mesh->SetMaterial(material);
+            }
+        }
     }
 
     bool CompareToReference(std::string const& file_name)
@@ -292,7 +322,7 @@ TEST_F(BasicTest, Init)
 }
 
 TEST_F(BasicTest, RenderTestScene)
-{
+{    
     ClearOutput();
 
     ASSERT_NO_THROW(m_controller->CompileScene(m_scene));

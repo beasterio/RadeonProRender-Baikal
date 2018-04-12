@@ -28,46 +28,46 @@ THE SOFTWARE.
 
 #define FAKE_SHAPE_SENTINEL 0xFFFFFF
 
-// The following functions are taken from PBRT
-float PhaseFunction_Uniform(float3 wi, float3 wo)
-{
-    return 1.f / (4.f * PI);
-}
-
-float PhaseFunction_Rayleigh(float3 wi, float3 wo)
-{
-    float costheta = dot(wi, wo);
-    return  3.f / (16.f*PI) * (1 + costheta * costheta);
-}
-
-float PhaseFunction_MieHazy(float3 wi, float3 wo)
-{
-    float costheta = dot(wi, wo);
-    return (0.5f + 4.5f * native_powr(0.5f * (1.f + costheta), 8.f)) / (4.f*PI);
-}
-
-float PhaseFunction_MieMurky(float3 wi, float3 wo)
-{
-    float costheta = dot(wi, wo);
-    return (0.5f + 16.5f * native_powr(0.5f * (1.f + costheta), 32.f)) / (4.f*PI);
-}
-
-float PhaseFunction_HG(float3 wi, float3 wo, float g)
+float PhaseFunctionHG(float3 wi, float3 wo, float g)
 {
     float costheta = dot(wi, wo);
     return 1.f / (4.f * PI) *
         (1.f - g*g) / native_powr(1.f + g*g - 2.f * g * costheta, 1.5f);
 }
 
+// See PBRT for derivation
+float PhaseFunctionHG_Sample(float3 wi, float g, float2 sample, float3* wo)
+{
+    float costheta = 0.f;
+    if (fabs(g) < 1e-5)
+    {
+        costheta = 1.f - 2.f * sample.x;
+    }
+    else
+    {
+        float temp = (1.f - g * g) / (1.f - g + 2.f * g * sample.x);
+        costheta = (1 + g * g - temp * temp) / (2.f * g);
+    }
+
+    float phi = 2.f * PI * sample.y;
+
+    float3 u = GetOrthoVector(-wi);
+    float3 v = normalize(cross(-wi, u));
+    *wo = u * native_cos(phi) + v * native_sin(phi) - wi * costheta;
+
+    return PhaseFunctionHG(wi, *wo, g);
+}
+
 // Evaluate volume transmittance along the ray [0, dist] segment
-float3 Volume_Transmittance(__global Volume const* volume, __global ray const* ray, float dist)
+float3 Volume_Transmittance(GLOBAL Volume const* volume, GLOBAL ray const* ray, float dist)
 {
     switch (volume->type)
     {
         case kHomogeneous:
         {
             // For homogeneous it is e(-sigma * dist)
-            float3 sigma_t = volume->sigma_a + volume->sigma_s;
+            float3 sigma_t = TEXTURED_INPUT_GET_COLOR(volume->sigma_a) +
+                             TEXTURED_INPUT_GET_COLOR(volume->sigma_s);
             return native_exp(-sigma_t * dist);
         }
     }
@@ -76,14 +76,13 @@ float3 Volume_Transmittance(__global Volume const* volume, __global ray const* r
 }
 
 // Evaluate volume selfemission along the ray [0, dist] segment
-float3 Volume_Emission(__global Volume const* volume, __global ray const* ray, float dist)
+float3 Volume_Emission(GLOBAL Volume const* volume, GLOBAL ray const* ray, float dist)
 {
     switch (volume->type)
     {
         case kHomogeneous:
         {
-            // For homogeneous it is simply Tr * Ev (since sigma_e is constant)
-            return Volume_Transmittance(volume, ray, dist) * volume->sigma_e;
+            return TEXTURED_INPUT_GET_COLOR(volume->sigma_e) * dist;
         }
     }
     
@@ -91,21 +90,45 @@ float3 Volume_Emission(__global Volume const* volume, __global ray const* ray, f
 }
 
 // Sample volume in order to find next scattering event
-float Volume_SampleDistance(__global Volume const* volume, __global ray const* ray, float maxdist, float sample, float* pdf)
+float Volume_SampleDistance(GLOBAL Volume const* volume, GLOBAL ray const* ray, float maxdist, float2 sample, float* pdf)
 {
+    // Sample component
+    float3 sigma_s = TEXTURED_INPUT_GET_COLOR(volume->sigma_s);
+    float sigma = sample.x < 0.33f ? sigma_s.x :
+                  sample.x < 0.66f ? sigma_s.y : sigma_s.z;
+
     switch (volume->type)
     {
         case kHomogeneous:
         {
-            // The PDF = sigma * e(-sigma * x), so the larger sigma the closer we scatter
-            float sigma = (volume->sigma_s.x + volume->sigma_s.y + volume->sigma_s.z) / 3;
-            float d = sigma > 0.f ? (-native_log(sample) / sigma) : -1.f;
-            *pdf = sigma > 0.f ? (sigma * native_exp(-sigma * d)) : 0.f;
+            
+            float d = sigma > 0.f ? (-native_log(sample.y) / sigma) : -1.f;
+            float temp = (1.f / 3.f) * (sigma_s.x * native_exp(-sigma_s.x * d)
+                + sigma_s.y * native_exp(-sigma_s.y * d)
+                + sigma_s.z * native_exp(-sigma_s.z * d));
+            *pdf = sigma > 0.f ? temp : 0.f;
             return d;
         }
     }
     
     return -1.f;
+}
+
+// Sample volume in order to find next scattering event
+float Volume_GetDistancePdf(GLOBAL Volume const* volume, float dist)
+{
+    switch (volume->type)
+    {
+    case kHomogeneous:
+    {
+        float3 sigma_s = TEXTURED_INPUT_GET_COLOR(volume->sigma_s);
+        return (1.f / 3.f) * (native_exp(-sigma_s.x * dist)
+                            + native_exp(-sigma_s.y * dist)
+                            + native_exp(-sigma_s.z * dist));
+    }
+    }
+
+    return 0.f;
 }
 
 // Apply volume effects (absorbtion and emission) and scatter if needed.
@@ -115,35 +138,35 @@ float Volume_SampleDistance(__global Volume const* volume, __global ray const* r
 // In case ray has missed geometry (has shapeid < 0) and has been scattered,
 // we put FAKE_SHAPE_SENTINEL into shapeid to prevent ray from being compacted away.
 //
-__kernel void EvaluateVolume(
+KERNEL void SampleVolume(
     // Ray batch
-    __global ray const* rays,
+    GLOBAL ray const* rays,
     // Pixel indices
-    __global int const* pixelindices,
+    GLOBAL int const* pixelindices,
     // Output indices
-    __global int const* output_indices,
+    GLOBAL int const* output_indices,
     // Number of rays
-    __global int const* numrays,
+    GLOBAL int const* numrays,
     // Volumes
-    __global Volume const* volumes,
+    GLOBAL Volume const* volumes,
     // Textures
     TEXTURE_ARG_LIST,
     // RNG seed
     uint rngseed,
     // Sampler state
-    __global uint* random,
+    GLOBAL uint* random,
     // Sobol matrices
-    __global uint const* sobol_mat,
+    GLOBAL uint const* sobol_mat,
     // Current bounce 
     int bounce,
     // Current frame
     int frame,
     // Intersection data
-    __global Intersection* isects,
+    GLOBAL Intersection* isects,
     // Current paths
-    __global Path* paths,
+    GLOBAL Path* paths,
     // Output
-    __global float3* output
+    GLOBAL float3* output
     )
 {
     int globalid = get_global_id(0);
@@ -153,7 +176,7 @@ __kernel void EvaluateVolume(
     {
         int pixelidx = pixelindices[globalid];
         
-        __global Path* path = paths + pixelidx;
+        GLOBAL Path* path = paths + pixelidx;
 
         // Path can be dead here since compaction step has not 
         // yet been applied
@@ -181,7 +204,9 @@ __kernel void EvaluateVolume(
             // Try sampling volume for a next scattering event
             float pdf = 0.f;
             float maxdist = Intersection_GetDistance(isects + globalid);
-            float d = Volume_SampleDistance(&volumes[volidx], &rays[globalid], maxdist, Sampler_Sample1D(&sampler, SAMPLER_ARGS), &pdf);
+            float2 sample = Sampler_Sample2D(&sampler, SAMPLER_ARGS);
+            float2 sample1 = Sampler_Sample2D(&sampler, SAMPLER_ARGS);
+            float d = Volume_SampleDistance(&volumes[volidx], &rays[globalid], maxdist, make_float2(sample.x, sample1.y), &pdf);
             
             // Check if we shall skip the event (it is either outside of a volume or not happened at all)
             bool skip = d < 0 || d > maxdist || pdf <= 0.f;
@@ -191,19 +216,20 @@ __kernel void EvaluateVolume(
                 // In case we skip we just need to apply volume absorbtion and emission for the segment we went through
                 // and clear scatter flag
                 Path_ClearScatterFlag(path);
-                // Emission contribution accounting for a throughput we have so far
-                Path_AddContribution(path, output, pixelidx, Volume_Emission(&volumes[volidx], &rays[globalid], maxdist));
                 // And finally update the throughput
-                Path_MulThroughput(path, Volume_Transmittance(&volumes[volidx], &rays[globalid], maxdist));
+                Path_MulThroughput(path, Volume_Transmittance(&volumes[volidx], &rays[globalid], maxdist) * Volume_GetDistancePdf(&volumes[volidx], maxdist));
+                // Emission contribution accounting for a throughput we have so far
+                Path_AddContribution(path, output, output_indices[pixelidx], Volume_Emission(&volumes[volidx], &rays[globalid], maxdist));
             }
             else
             {
                 // Set scattering flag to notify ShadeVolume kernel to handle this path
                 Path_SetScatterFlag(path);
-                // Emission contribution accounting for a throughput we have so far
-                Path_AddContribution(path, output, pixelidx, Volume_Emission(&volumes[volidx], &rays[globalid], d) / pdf);
                 // Update the throughput
-                Path_MulThroughput(path, (Volume_Transmittance(&volumes[volidx], &rays[globalid], d) / pdf));
+                float3 sigma_s = TEXTURED_INPUT_GET_COLOR(volumes[volidx].sigma_s);
+                Path_MulThroughput(path, sigma_s * (Volume_Transmittance(&volumes[volidx], &rays[globalid], d) / pdf));
+                // Emission contribution accounting for a throughput we have so far
+                Path_AddContribution(path, output, output_indices[pixelidx], Volume_Emission(&volumes[volidx], &rays[globalid], d) / pdf);
                 // Put fake shape to prevent from being compacted away
                 isects[globalid].shapeid = FAKE_SHAPE_SENTINEL;
                 // And keep scattering distance around as well

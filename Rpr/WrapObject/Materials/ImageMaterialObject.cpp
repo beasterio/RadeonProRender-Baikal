@@ -26,7 +26,7 @@ THE SOFTWARE.
 #include "math/int2.h"
 #include "SceneGraph/texture.h"
 #include "SceneGraph/material.h"
-#include "SceneGraph/IO/image_io.h"
+#include "image_io.h"
 #include "SceneGraph/iterator.h"
 #include "ImageMaterialObject.h"
 #include "WrapObject/Exception.h"
@@ -87,7 +87,8 @@ ImageMaterialObject::ImageMaterialObject(rpr_image_format const in_format, rpr_i
             //clean other colors
             for (unsigned int comp_ind = in_format.num_components; comp_ind < 4; ++comp_ind)
             {
-                memset(&data[i * 4 + comp_ind], 0, component_bytes);
+                int index = comp_ind * component_bytes;
+                memset(&data[i * 4 + index], 0, component_bytes);
             }
         }
     }

@@ -19,6 +19,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ********************************************************************/
+#ifndef INTEGRATOR_BDPT_CL
+#define INTEGRATOR_BDPT_CL
+
 #include <../Baikal/Kernels/CL/common.cl>
 #include <../Baikal/Kernels/CL/ray.cl>
 #include <../Baikal/Kernels/CL/isect.cl>
@@ -29,7 +32,6 @@ THE SOFTWARE.
 #include <../Baikal/Kernels/CL/normalmap.cl>
 #include <../Baikal/Kernels/CL/bxdf.cl>
 #include <../Baikal/Kernels/CL/light.cl>
-#include <../Baikal/Kernels/CL/camera.cl>
 #include <../Baikal/Kernels/CL/scene.cl>
 #include <../Baikal/Kernels/CL/material.cl>
 #include <../Baikal/Kernels/CL/volumetrics.cl>
@@ -1059,5 +1061,5 @@ KERNEL void ConnectCaustics(
     image_plane_positions[global_id] = impuv;
 }
 
-
+#endif
 

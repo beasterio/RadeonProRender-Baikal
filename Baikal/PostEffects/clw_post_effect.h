@@ -31,18 +31,25 @@ THE SOFTWARE.
 
 namespace Baikal
 {
+    class CLProgramManager;
     /**
     \brief Post effects partial implementation based on CLW framework.
     */
-    class ClwPostEffect: public PostEffect, protected ClwClass
+    class ClwPostEffect : public PostEffect, protected ClwClass
     {
     public:
         // Constructor, receives CLW context
-        ClwPostEffect(CLWContext context, std::string const& file_name);
+        ClwPostEffect(const CLProgramManager *program_manager, CLWContext context, std::string const& file_name);
+        //ClwPostEffect(const CLProgramManager *program_manager, CLWContext context, const char* data, const char* includes[], std::size_t inc_num);
     };
-
-    inline ClwPostEffect::ClwPostEffect(CLWContext context, std::string const& file_name)
-        : ClwClass(context, file_name)
+    
+    inline ClwPostEffect::ClwPostEffect(const CLProgramManager *program_manager, CLWContext context, std::string const& file_name)
+        : ClwClass(context, program_manager, file_name)
     {
     }
+
+/*    inline ClwPostEffect::ClwPostEffect(const CLProgramManager *program_manager, CLWContext context, const char* data, const char* includes[], std::size_t inc_num)
+        : ClwClass(context, program_manager, data, includes, inc_num)
+    {
+    }*/
 }

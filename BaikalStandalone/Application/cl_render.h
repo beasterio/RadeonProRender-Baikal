@@ -25,6 +25,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <future>
 
 #include "RenderFactory/render_factory.h"
 #include "Renderers/monte_carlo_renderer.h"
@@ -52,6 +53,7 @@ namespace Baikal
             std::unique_ptr<Baikal::Output> output_position;
             std::unique_ptr<Baikal::Output> output_normal;
             std::unique_ptr<Baikal::Output> output_albedo;
+            std::unique_ptr<Baikal::Output> output_mesh_id;
             std::unique_ptr<Baikal::Output> output_denoised;
             std::unique_ptr<Baikal::PostEffect> denoiser;
 #endif
@@ -89,17 +91,20 @@ namespace Baikal
 
         void SaveImage(const std::string& name, int width, int height, int bpp, const RadeonRays::float3* data);
 
-        Baikal::PerspectiveCamera::Ptr GetCamera() { return m_camera; };
-        Baikal::Scene1::Ptr GetScene() { return m_scene; };
-        CLWDevice GetDevice(int i) { return m_cfgs[m_primary].context.GetDevice(i); };
-        Renderer::OutputType GetOutputType() { return m_output_type; };
+        inline Baikal::Camera::Ptr GetCamera() { return m_camera; };
+        inline Baikal::Scene1::Ptr GetScene() { return m_scene; };
+        inline CLWDevice GetDevice(int i) { return m_cfgs[m_primary].context.GetDevice(i); };
+        inline Renderer::OutputType GetOutputType() { return m_output_type; };
 
         void SetNumBounces(int num_bounces);
         void SetOutputType(Renderer::OutputType type);
         //this will enable additional aov outputs
         void EnableOutputType(Renderer::OutputType type);
         void DisableOutputType(Renderer::OutputType type);
+        std::future<int> GetShapeId(std::uint32_t x, std::uint32_t y);
+        Baikal::Shape::Ptr GetShapeById(int shape_id);
 #ifdef ENABLE_DENOISER        
+
         // Denoiser
         void SetDenoiserFloatParam(const std::string& name, const float4& value);
         float4 GetDenoiserFloatParam(const std::string& name);
@@ -111,13 +116,18 @@ namespace Baikal
         void RenderThread(ControlData& cd);
 
         Baikal::Scene1::Ptr m_scene;
-        Baikal::PerspectiveCamera::Ptr m_camera;
+        Baikal::Camera::Ptr m_camera;
 
+        std::promise<int> m_promise;
+        bool m_shape_id_requested = false;
+        OutputData m_shape_id_data;
+        RadeonRays::float2 m_shape_id_pos;
         std::vector<ConfigManager::Config> m_cfgs;
         std::vector<OutputData> m_outputs;
         std::unique_ptr<ControlData[]> m_ctrl;
         std::vector<std::thread> m_renderthreads;
         int m_primary = -1;
+        std::uint32_t m_width, m_height;
 
         //if interop
         CLWImage2D m_cl_interop_image;

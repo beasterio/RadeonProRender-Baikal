@@ -69,6 +69,8 @@ public:
         kStandard = RPR_MATERIAL_NODE_STANDARD,
         kPassthrough = RPR_MATERIAL_NODE_PASSTHROUGH,
         kOrennayar = RPR_MATERIAL_NODE_ORENNAYAR,
+        kArithmetic = RPR_MATERIAL_NODE_ARITHMETIC,
+        kUberV2 = 0x100
     };
 
     //initialize methods
@@ -82,12 +84,14 @@ public:
     bool IsMap() { return   m_type == Type::kBumpMap || 
                             m_type == Type::kNormalMap || 
                             m_type == Type::kDotTexture; }
+    bool IsArithmetic() const { return m_type == Type::kArithmetic; }
 
     bool IsTexture() { return IsImg() || IsMap(); }
 
     //inputs
     void SetInputValue(const std::string& input_name, MaterialObject* input);
     void SetInputValue(const std::string& input_name, const RadeonRays::float4& val);
+    void SetInputValue(const std::string& input_name, rpr_uint val);
 
     //Get*
     Type GetType() { return m_type; }
@@ -97,7 +101,7 @@ public:
     //rprMaterialGetInfo:
     uint64_t GetInputCount();
     rpr_uint GetInputType(int i);
-    void GetInput(int i, void* out, size_t* out_size);
+    virtual void GetInput(int i, void* out, size_t* out_size);
     //get input by index.
     //Note: RPR related input name
     std::string GetInputName(int i);
@@ -119,6 +123,7 @@ protected:
     virtual void SetInputTexture(const std::string& input_name, TextureMaterialObject* input);
     virtual void SetInputImage(const std::string& input_name, ImageMaterialObject* input);
     virtual void SetInputF(const std::string& input_name, const RadeonRays::float4& val);
+    virtual void SetInputU(const std::string& input_name, rpr_uint val);
 private:
 
     //handle input materials, it need for correct rprMaterialGet* methods.
