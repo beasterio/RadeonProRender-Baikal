@@ -40,6 +40,8 @@ THE SOFTWARE.
 #include "ImGUI/imgui.h"
 #include "ImGUI/imgui_impl_glfw_gl3.h"
 
+#include "XML/tinyxml2.h"
+
 #include <memory>
 #include <chrono>
 #include <cassert>
@@ -86,7 +88,7 @@ namespace Baikal
     static bool     g_is_l_pressed = false;
     static float2   g_mouse_pos = float2(0, 0);
     static float2   g_mouse_delta = float2(0, 0);
-    const std::string kCameraLogFile("camera.log");
+    const std::string kCameraLogFile("camera.xml");
     //ls - light set
     const std::string kLightLogFile("light.ls");
 
@@ -384,25 +386,44 @@ namespace Baikal
             //log camera props
             if (g_is_c_pressed)
             {
-                std::ofstream fs;
-                fs.open(m_settings.camera_out_folder + "/" + kCameraLogFile, std::ios::app);
                 PerspectiveCamera* pcam = dynamic_cast<PerspectiveCamera*>(camera.get());
-                RadeonRays::float3 cam_pos = camera->GetPosition();
-                RadeonRays::float3 cam_at = cam_pos + camera->GetForwardVector();
+                //camera values
+                RadeonRays::float3 cam_pos = pcam->GetPosition();
+                RadeonRays::float3 cam_at = cam_pos + pcam->GetForwardVector();
                 float aperture = pcam->GetAperture();
                 float focus_dist = pcam->GetFocusDistance();
                 float focal_length = pcam->GetFocalLength();
-                    //camera position
-                fs << " -cpx " << cam_pos.x
-                    << " -cpy " << cam_pos.y
-                    << " -cpz " << cam_pos.z
-                    //camera look at
-                    << " -tpx " << cam_at.x
-                    << " -tpy " << cam_at.y
-                    << " -tpz " << cam_at.z
-                    << " -a " << aperture
-                    << " -fd " << focus_dist
-                    << " -fl " << focal_length << std::endl;
+
+                tinyxml2::XMLDocument doc;
+                tinyxml2::XMLPrinter printer;
+
+                std::string xml_file = m_settings.camera_out_folder + +"/" + kCameraLogFile;
+                doc.LoadFile(xml_file.c_str());
+                auto root = doc.FirstChildElement("cam_list");
+                if (!root)
+                {
+                    root = doc.NewElement("cam_list");
+                    doc.InsertFirstChild(root);
+                }
+
+                auto new_cam = doc.NewElement("camera");
+                //position
+                new_cam->SetAttribute("cpx", cam_pos.x);
+                new_cam->SetAttribute("cpy", cam_pos.y);
+                new_cam->SetAttribute("cpz", cam_pos.z);
+
+                //target
+                new_cam->SetAttribute("tpx", cam_at.x);
+                new_cam->SetAttribute("tpy", cam_at.y);
+                new_cam->SetAttribute("tpz", cam_at.z);
+
+                //other values
+                new_cam->SetAttribute("aperture", aperture);
+                new_cam->SetAttribute("focus_dist", focus_dist);
+                new_cam->SetAttribute("focal_length", focal_length);
+
+                root->InsertEndChild(new_cam);
+                doc.SaveFile(xml_file.c_str());
 
                 g_is_c_pressed = false;
             }
@@ -491,6 +512,7 @@ namespace Baikal
                 for (auto it_aov = output_desc_map.begin(); it_aov != output_desc_map.end(); ++it_aov)
                 {
                     std::string out_name = m_settings.aov_out_folder + "/" + "cam_" + std::to_string(line_number) + "_aov_" + it_aov->type_str + "_f" + std::to_string(m_settings.samplecount) + "." + it_aov->ext;
+                    std::cerr << out_name << std::endl;
                     m_cl->SaveFrameBuffer(it_aov->type, m_settings, out_name, it_aov->bpp);
                 }
                 m_aov_samples.erase(it);
@@ -501,7 +523,7 @@ namespace Baikal
             if (m_aov_samples.empty())
             {
                 //read new camera position
-                if (m_camera_log_fs && !m_camera_log_fs.eof())
+                if (m_cam_current_elem)
                 {
                     //close app if max is reached
                     if (line_number == m_settings.camera_set_max)
@@ -509,53 +531,41 @@ namespace Baikal
                         exit(0);
                     }
 
-                    std::vector<std::string> arg;
-                    std::vector<char*> argv;
+                    auto cam = dynamic_cast<PerspectiveCamera*>(m_cl->GetCamera().get());
+                    RadeonRays::float3 pos;
+                    RadeonRays::float3 at;
+                    RadeonRays::float3 up{0, 1, 0};
+                    RadeonRays::float2 zcap{0.0f, 100000.f};
+                    float focal_length;
+                    float focus_distance;
+                    float aperture;
+
                     do
                     {
                         line_number++;
 
-                        arg.clear();
-                        argv.clear();
-                        //read camera line
-                        std::string line;
-                        std::stringstream ss;
-                        std::getline(m_camera_log_fs, line);
-                        ss.str(line);
+                        //parse camera data from xml
+                        pos.x = m_cam_current_elem->FloatAttribute("cpx");
+                        pos.y = m_cam_current_elem->FloatAttribute("cpy");
+                        pos.z = m_cam_current_elem->FloatAttribute("cpz");
 
-                        while (ss.rdbuf()->in_avail())
-                        {
-                            std::string val;
-                            ss >> val;
-                            arg.emplace_back(std::move(val));
-                        }
-                        for (auto & a : arg)
-                        {
-                            argv.push_back(&a[0]);
-                        }
-                    } while (!m_camera_log_fs.eof() && line_number < m_settings.camera_set_min);
+                        at.x = m_cam_current_elem->FloatAttribute("tpx");
+                        at.y = m_cam_current_elem->FloatAttribute("tpy");
+                        at.z = m_cam_current_elem->FloatAttribute("tpz");
 
-                    //parse
-                    AppCliParser cli;
-                    auto cam_settings = cli.Parse(argv.size(), argv.data());
-                    cam_settings.height = m_settings.height;
-                    cam_settings.width = m_settings.width;
-                    auto cam = dynamic_cast<PerspectiveCamera*>(m_cl->GetCamera().get());
+                        focal_length = m_cam_current_elem->FloatAttribute("focal_length");
+                        focus_distance = m_cam_current_elem->FloatAttribute("focus_dist");
+                        aperture = m_cam_current_elem->FloatAttribute("aperture");
+
+                        m_cam_current_elem = m_cam_current_elem->NextSiblingElement("camera");
+                    } while (m_cam_current_elem && line_number < m_settings.camera_set_min);
 
                     //change camera
-                    cam->LookAt(cam_settings.camera_pos,
-                        cam_settings.camera_at,
-                        cam_settings.camera_up);
-
-                    // Adjust sensor size based on current aspect ratio
-                    float aspect = (float)cam_settings.width / cam_settings.height;
-                    cam_settings.camera_sensor_size.y = cam_settings.camera_sensor_size.x / aspect;
-
-                    cam->SetSensorSize(cam_settings.camera_sensor_size);
-                    cam->SetDepthRange(cam_settings.camera_zcap);
-                    cam->SetFocalLength(cam_settings.camera_focal_length);
-                    cam->SetFocusDistance(cam_settings.camera_focus_distance);
-                    cam->SetAperture(cam_settings.camera_aperture);
+                    cam->LookAt(pos, at, up);
+                    cam->SetDepthRange(zcap);
+                    cam->SetFocalLength(focal_length);
+                    cam->SetFocusDistance(focus_distance);
+                    cam->SetAperture(aperture);
 
                     //prepare samples
                     std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
@@ -684,11 +694,11 @@ namespace Baikal
         // Command line parsing
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
-        m_camera_log_fs.open(m_settings.camera_set);
-        if (!m_camera_log_fs)
+        m_cam_xml.LoadFile(m_settings.camera_set.c_str());
+        auto root = m_cam_xml.FirstChildElement("cam_list");
+        if (root)
         {
-            std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
-            m_aov_samples.insert(samples_n.begin(), samples_n.end());
+            m_cam_current_elem = root->FirstChildElement("camera");
         }
 
         if (!m_settings.cmd_line_mode)

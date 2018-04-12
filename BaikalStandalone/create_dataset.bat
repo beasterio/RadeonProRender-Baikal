@@ -49,8 +49,8 @@ IF NOT EXIST "%SUBDIR_LIGHT%" mkdir "%SUBDIR_LIGHT%"
 echo %SUBDIR_LIGHT%
 rem iterate through different camera settings
 rem and create 
-echo "../Bin/Release/x64/BaikalStandalone64.exe" -w %WIDTH% -h %HEIGHT% -p  %SCENE_FOLDER% -f %SCENE% -light_set %LIGHT_SET% -save_aov -camera_set %CAMERA_LOG_FILE% -output_aov %SUBDIR_LIGHT% -aov_samples %MAX_SAMPLES% -camera_set_min %MIN% -camera_set_max %MAX%
-"../Bin/Release/x64/BaikalStandalone64.exe" -w %WIDTH% -h %HEIGHT% -p  %SCENE_FOLDER% -f %SCENE% -light_set %LIGHT_SET% -save_aov -camera_set %CAMERA_LOG_FILE% -output_aov %SUBDIR_LIGHT% -aov_samples %MAX_SAMPLES% -camera_set_min %MIN% -camera_set_max %MAX% > NUL
+echo "../build/bin/Release/BaikalStandalone.exe" -w %WIDTH% -h %HEIGHT% -p  %SCENE_FOLDER% -f %SCENE% -light_set %LIGHT_SET% -save_aov -camera_set %CAMERA_LOG_FILE% -output_aov %SUBDIR_LIGHT% -aov_samples %MAX_SAMPLES% -camera_set_min %MIN% -camera_set_max %MAX%
+"../build/bin/Release/BaikalStandalone.exe" -w %WIDTH% -h %HEIGHT% -p  %SCENE_FOLDER% -f %SCENE% -light_set %LIGHT_SET% -save_aov -camera_set %CAMERA_LOG_FILE% -output_aov %SUBDIR_LIGHT% -aov_samples %MAX_SAMPLES% -camera_set_min %MIN% -camera_set_max %MAX% > NUL
 
 rem 
 EXIT /B 0

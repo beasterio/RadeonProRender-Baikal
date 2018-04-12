@@ -26,6 +26,7 @@
 #include "Application/cl_render.h"
 #include "Application/gl_render.h"
 #include "image_io.h"
+#include "XML/tinyxml2.h"
 
 #include <future>
 #include <memory>
@@ -68,7 +69,8 @@ namespace Baikal
 
         //frames to save AOVs
         std::set<int> m_aov_samples;
-        std::ifstream m_camera_log_fs;
+        tinyxml2::XMLDocument m_cam_xml;
+        tinyxml2::XMLElement* m_cam_current_elem;
         int m_shape_id_val;
         int m_current_shape_id;
         std::string m_object_name;
