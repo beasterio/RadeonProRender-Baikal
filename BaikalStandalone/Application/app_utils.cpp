@@ -190,6 +190,9 @@ namespace Baikal
         if (CmdOptionExists(argv, argv + argc, "-save_aov"))
         {
             s.save_aov = true;
+
+            //TODO: disable due to nv imgui problems
+            s.gui_visible = false;
         }
 
         return s;
