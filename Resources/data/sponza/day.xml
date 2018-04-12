@@ -1,0 +1,4 @@
+<light_list>
+    <light type="direct" posx="0" posy="0" posz="0" dirx="0.094909564" diry="-0.99055767" dirz="0.09893316" radx="5" rady="5" radz="5"/>
+    <light type="ibl" tex="../Resources/Textures/Canopus_Ground_4k.exr" mul="1" posx="0" posy="0" posz="0" dirx="0" diry="-1" dirz="0" radx="1" rady="1" radz="1"/>
+</light_list>

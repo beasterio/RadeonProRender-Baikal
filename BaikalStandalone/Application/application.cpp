@@ -87,7 +87,6 @@ namespace
         float focal_length = cam->GetFocalLength();
 
         tinyxml2::XMLDocument doc;
-        tinyxml2::XMLPrinter printer;
 
         doc.LoadFile(xml);
         auto root = doc.FirstChildElement("cam_list");
@@ -117,7 +116,78 @@ namespace
         doc.SaveFile(xml);
     }
 
-    void TranslateTXTtoXML(std::string const& txt, std::string const& xml, Baikal::AppSettings const& settings)
+    void AppendLight(Baikal::Light::Ptr l, const char* xml)
+    {
+        //get light type
+        Baikal::ImageBasedLight* ibl = dynamic_cast<Baikal::ImageBasedLight*>(l.get());
+        Baikal::PointLight* pointl = dynamic_cast<Baikal::PointLight*>(l.get());
+        Baikal::DirectionalLight* directl = dynamic_cast<Baikal::DirectionalLight*>(l.get());
+        Baikal::SpotLight* spotl = dynamic_cast<Baikal::SpotLight*>(l.get());
+        Baikal::AreaLight* areal = dynamic_cast<Baikal::AreaLight*>(l.get());
+
+        tinyxml2::XMLDocument doc;
+
+        doc.LoadFile(xml);
+        auto root = doc.FirstChildElement("light_list");
+        if (!root)
+        {
+            root = doc.NewElement("light_list");
+            doc.InsertFirstChild(root);
+        }
+
+        if (areal)
+        {
+            //area lights are created when materials load, so ignore it;
+            return;
+        }
+
+        tinyxml2::XMLElement* light_elem = nullptr;
+        if (ibl)
+        {
+            light_elem = doc.NewElement("light");
+            light_elem->SetAttribute("type", "ibl");
+            light_elem->SetAttribute("tex", ibl->GetTexture()->GetName().c_str());
+            light_elem->SetAttribute("mul", ibl->GetMultiplier());
+        }
+        else if (spotl)
+        {
+            light_elem = doc.NewElement("light");
+            light_elem->SetAttribute("type", "spot");
+            light_elem->SetAttribute("csx", spotl->GetConeShape().x);
+            light_elem->SetAttribute("csy", spotl->GetConeShape().y);
+        }
+        else if (pointl)
+        {
+            light_elem = doc.NewElement("light");
+            light_elem->SetAttribute("type", "point");
+        }
+        else if (directl)
+        {
+            light_elem = doc.NewElement("light");
+            light_elem->SetAttribute("type", "direct");
+        }
+
+        float3 p = l->GetPosition();
+        float3 d = l->GetDirection();
+        float3 r = l->GetEmittedRadiance();
+        
+        light_elem->SetAttribute("posx", p.x);
+        light_elem->SetAttribute("posy", p.y);
+        light_elem->SetAttribute("posz", p.z);
+
+        light_elem->SetAttribute("dirx", d.x);
+        light_elem->SetAttribute("diry", d.y);
+        light_elem->SetAttribute("dirz", d.z);
+
+        light_elem->SetAttribute("radx", r.x);
+        light_elem->SetAttribute("rady", r.y);
+        light_elem->SetAttribute("radz", r.z);
+
+        root->InsertEndChild(light_elem);
+        doc.SaveFile(xml);
+    }
+
+    void TranslateCamTXTtoXML(std::string const& txt, std::string const& xml)
     {
         std::vector<std::string> arg;
         std::vector<char*> argv;
@@ -172,6 +242,118 @@ namespace
             AppendCamera(cam.get(), xml.c_str());
         }
     }
+
+    void TranslateLightTXTtoXML(std::string const& txt, std::string const& xml)
+    {
+        std::ifstream fs(txt);
+        if (!fs)
+        {
+            throw std::runtime_error("Failed to open lights set file." + txt);
+        }
+        std::string line;
+        Baikal::Light::Ptr new_light;
+        while (std::getline(fs, line))
+        {
+            //lights are separated by empty lines
+            if (line.empty())
+            {
+                continue;
+            }
+
+            std::istringstream iss(line);
+            std::string val_name;
+            iss >> val_name;
+
+            if (val_name == "newlight")
+            {
+                if (new_light) AppendLight(new_light, xml.c_str());
+
+                std::string type;
+                iss >> type;
+                if (type == "point")
+                {
+                    new_light = Baikal::PointLight::Create();
+                }
+                else if (type == "direct")
+                {
+                    new_light = Baikal::DirectionalLight::Create();
+                }
+                else if (type == "spot")
+                {
+                    new_light = Baikal::SpotLight::Create();
+                }
+                else if (type == "ibl")
+                {
+                    new_light = Baikal::ImageBasedLight::Create();
+                }
+                else
+                {
+                    throw std::runtime_error("Invalid light type " + type);
+                }
+            }
+            else if (val_name == "p")
+            {
+                float3 pos;
+                iss >> pos.x >> pos.y >> pos.z;
+                new_light->SetPosition(pos);
+            }
+            else if (val_name == "d")
+            {
+                float3 dir;
+                iss >> dir.x >> dir.y >> dir.z;
+                new_light->SetDirection(dir);
+            }
+            else if (val_name == "r")
+            {
+                float3 r;
+                iss >> r.x >> r.y >> r.z;
+                new_light->SetEmittedRadiance(r);
+            }
+            else if (val_name == "cs")
+            {
+                float2 cs;
+                iss >> cs.x >> cs.y;
+                //this option available only for spot light
+                Baikal::SpotLight::Ptr spot = std::dynamic_pointer_cast<Baikal::SpotLight>(new_light);
+                spot->SetConeShape(cs);
+            }
+            else if (val_name == "tex")
+            {
+                std::string tex_name;
+                //texture name can contain spaces
+                getline(iss, tex_name);
+                //remove ' ' from string
+                tex_name.erase(0, 1);
+                //this option available only for ibl
+                Baikal::ImageBasedLight::Ptr ibl = std::dynamic_pointer_cast<Baikal::ImageBasedLight>(new_light);
+                auto image_io(Baikal::ImageIo::CreateImageIo());
+                Baikal::Texture::Ptr tex = image_io->LoadImage(tex_name.c_str());
+                tex->SetName(tex_name);
+                ibl->SetTexture(tex);
+            }
+            else if (val_name == "mul")
+            {
+                float mul;
+                iss >> mul;
+                //this option available only for ibl
+                Baikal::ImageBasedLight::Ptr ibl = std::dynamic_pointer_cast<Baikal::ImageBasedLight>(new_light);
+                ibl->SetMultiplier(mul);
+            }
+
+        }
+        if (new_light) AppendLight(new_light, xml.c_str());
+
+    }
+
+    void TranslateLights(std::string const& folder)
+    {
+        TranslateLightTXTtoXML(folder + "cloudy.ls", folder + "cloudy.xml");
+        TranslateLightTXTtoXML(folder + "day.ls", folder + "day.xml");
+        TranslateLightTXTtoXML(folder + "evening.ls", folder + "evening.xml");
+        TranslateLightTXTtoXML(folder + "morning.ls", folder + "morning.xml");
+        TranslateLightTXTtoXML(folder + "night.ls", folder + "night.xml");
+    }
+
 }
 
 namespace Baikal
@@ -501,48 +683,7 @@ namespace Baikal
                 for (; it->IsValid(); it->Next())
                 {
                     Light::Ptr l = it->ItemAs<Light>();
-
-                    //get light type
-                    ImageBasedLight* ibl = dynamic_cast<ImageBasedLight*>(l.get());
-                    PointLight* pointl = dynamic_cast<PointLight*>(l.get());
-                    DirectionalLight* directl = dynamic_cast<DirectionalLight*>(l.get());
-                    SpotLight* spotl = dynamic_cast<SpotLight*>(l.get());
-                    AreaLight* areal = dynamic_cast<AreaLight*>(l.get());
-
-                    if (areal)
-                    {
-                        //area lights are created when materials load, so ignore it;
-                        continue;
-                    }
-                    
-                    if (ibl)
-                    {
-                        fs << "newlight ibl" << std::endl;
-                        //image path should be stored as tex name
-                        fs << "tex " << ibl->GetTexture()->GetName() << std::endl;
-                        fs << "mul " << std::to_string(ibl->GetMultiplier()) << std::endl;
-                    }
-                    else if (spotl)
-                    {
-                        fs << "newlight spot" << std::endl;
-                        fs << "cs " << spotl->GetConeShape().x << " " << spotl->GetConeShape().y << std::endl;
-                    }
-                    else if (pointl)
-                    {
-                        fs << "newlight point" << std::endl;
-                    }
-                    else if (directl)
-                    {
-                        fs << "newlight direct" << std::endl;
-                    }
-
-                    float3 p = l->GetPosition();
-                    float3 d = l->GetDirection();
-                    float3 r = l->GetEmittedRadiance();
-                    fs << "p " << p.x << " " << p.y << " " << p.z << std::endl;
-                    fs << "d " << d.x << " " << d.y << " " << d.z << std::endl;
-                    fs << "r " << r.x << " " << r.y << " " << r.z << std::endl;
-                    fs << std::endl;
+                    AppendLight(l, kLightLogFile.c_str());
                 }
 
                 g_is_l_pressed = false;
@@ -759,14 +900,19 @@ namespace Baikal
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
 
-        //TranslateTXTtoXML("../Resources/data/cloister/cam.log", "../Resources/data/cloister/cam.xml", m_settings);
-        //TranslateTXTtoXML("../Resources/data/CornellBox/cam.log", "../Resources/data/CornellBox/cam.xml", m_settings);
-        //TranslateTXTtoXML("../Resources/data/kitchen/cam.log", "../Resources/data/kitchen/cam.xml", m_settings);
-        //TranslateTXTtoXML("../Resources/data/salle_de_bain/cam.log", "../Resources/data/salle_de_bain/cam.xml", m_settings);
-        //TranslateTXTtoXML("../Resources/data/san-miguel/cam.log", "../Resources/data/san-miguel/cam.xml", m_settings);
-        //TranslateTXTtoXML("../Resources/data/sponza/cam.log", "../Resources/data/sponza/cam.xml", m_settings);
-
-
+        //TranslateCamTXTtoXML("../Resources/data/cloister/cam.log", "../Resources/data/cloister/cam.xml");
+        //TranslateCamTXTtoXML("../Resources/data/CornellBox/cam.log", "../Resources/data/CornellBox/cam.xml");
+        //TranslateCamTXTtoXML("../Resources/data/kitchen/cam.log", "../Resources/data/kitchen/cam.xml");
+        //TranslateCamTXTtoXML("../Resources/data/salle_de_bain/cam.log", "../Resources/data/salle_de_bain/cam.xml");
+        //TranslateCamTXTtoXML("../Resources/data/san-miguel/cam.log", "../Resources/data/san-miguel/cam.xml");
+        //TranslateCamTXTtoXML("../Resources/data/sponza/cam.log", "../Resources/data/sponza/cam.xml");
+        //TranslateLights("../Resources/data/cloister/");
+        //TranslateLights("../Resources/data/CornellBox/");
+        //TranslateLights("../Resources/data/kitchen/");
+        //TranslateLights("../Resources/data/salle_de_bain/");
+        //TranslateLights("../Resources/data/san-miguel/");
+        //TranslateLights("../Resources/data/sponza/");
+            
         m_cam_xml.LoadFile(m_settings.camera_set.c_str());
         auto root = m_cam_xml.FirstChildElement("cam_list");
         if (root)

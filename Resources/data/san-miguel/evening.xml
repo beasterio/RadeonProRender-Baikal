@@ -1,0 +1,4 @@
+<light_list>
+    <light type="direct" posx="0" posy="0" posz="0" dirx="-0.45206711" diry="-0.52566314" dirz="-0.72063416" radx="4.2968798" rady="2.9882801" radz="2.0507801"/>
+    <light type="ibl" tex="../Resources/Textures/stonewall.hdr" mul="1" posx="0" posy="0" posz="0" dirx="0" diry="-1" dirz="0" radx="1" rady="1" radz="1"/>
+</light_list>

@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "scene_io.h"
 #include "image_io.h"
 #include "material_io.h"
+#include "XML/tinyxml2.h"
 #include "SceneGraph/material.h"
 
 #include "Renderers/monte_carlo_renderer.h"
@@ -269,100 +270,75 @@ namespace Baikal
     {
         if (!settings.light_set.empty())
         {
-            std::ifstream fs(settings.light_set);
-            if (!fs)
+            tinyxml2::XMLDocument doc;
+            doc.LoadFile(settings.light_set.c_str());
+            auto root = doc.FirstChildElement("light_list");
+            if (!root)
             {
                 throw std::runtime_error("Failed to open lights set file." + settings.light_set);
             }
-            std::string line;
+
             Light::Ptr new_light;
-            while (std::getline(fs, line))
+            tinyxml2::XMLElement* elem = root->FirstChildElement("light");
+            while (elem)
             {
-                //lights are separated by empty lines
-                if (line.empty())
+                //type
+                std::string type = elem->Attribute("type");
+                if (type == "point")
                 {
-                    continue;
+                    new_light = PointLight::Create();
                 }
-
-                std::istringstream iss(line);
-                std::string val_name;
-                iss >> val_name;
-
-                if (val_name == "newlight")
+                else if (type == "direct")
                 {
-                    std::string type;
-                    iss >> type;
-                    if (type == "point")
-                    {
-                        new_light = PointLight::Create();
-                    }
-                    else if (type == "direct")
-                    {
-                        new_light = DirectionalLight::Create();
-                    }
-                    else if (type == "spot")
-                    {
-                        new_light = SpotLight::Create();
-                    }
-                    else if (type == "ibl")
-                    {
-                        new_light = ImageBasedLight::Create();
-                    }
-                    else
-                    {
-                        throw std::runtime_error("Invalid light type " + type);
-                    }
-                    m_scene->AttachLight(new_light);
+                    new_light = DirectionalLight::Create();
                 }
-                else if (val_name == "p")
+                else if (type == "spot")
                 {
-                    float3 pos;
-                    iss >> pos.x >> pos.y >> pos.z;
-                    new_light->SetPosition(pos);
-                }
-                else if (val_name == "d")
-                {
-                    float3 dir;
-                    iss >> dir.x >> dir.y >> dir.z;
-                    new_light->SetDirection(dir);
-                }
-                else if (val_name == "r")
-                {
-                    float3 r;
-                    iss >> r.x >> r.y >> r.z;
-                    new_light->SetEmittedRadiance(r);
-                }
-                else if (val_name == "cs")
-                {
-                    float2 cs;
-                    iss >> cs.x >> cs.y;
+                    new_light = SpotLight::Create();
+                    RadeonRays::float2 cs;
+                    cs.x = elem->FloatAttribute("csx");
+                    cs.y = elem->FloatAttribute("csy");
                     //this option available only for spot light
                     SpotLight::Ptr spot = std::dynamic_pointer_cast<SpotLight>(new_light);
                     spot->SetConeShape(cs);
                 }
-                else if (val_name == "tex")
+                else if (type == "ibl")
                 {
-                    std::string tex_name;
-                    //texture name can contain spaces
-                    getline(iss, tex_name);
-                    //remove ' ' from string
-                    tex_name.erase(0, 1);
+                    new_light = ImageBasedLight::Create();
+                    std::string tex_name = elem->Attribute("tex");
+                    float mul = elem->FloatAttribute("mul");
+
                     //this option available only for ibl
                     ImageBasedLight::Ptr ibl = std::dynamic_pointer_cast<ImageBasedLight>(new_light);
                     auto image_io(ImageIo::CreateImageIo());
                     Texture::Ptr tex = image_io->LoadImage(tex_name.c_str());
                     ibl->SetTexture(tex);
-                }
-                else if (val_name == "mul")
-                {
-                    float mul;
-                    iss >> mul;
-                    //this option available only for ibl
-                    ImageBasedLight::Ptr ibl = std::dynamic_pointer_cast<ImageBasedLight>(new_light);
                     ibl->SetMultiplier(mul);
-                }
-            }
 
+                }
+                else
+                {
+                    throw std::runtime_error("Invalid light type " + type);
+                }
+                RadeonRays::float3 p;
+                RadeonRays::float3 d;
+                RadeonRays::float3 r;
+
+                p.x = elem->FloatAttribute("posx");
+                p.y = elem->FloatAttribute("posy");
+                p.z = elem->FloatAttribute("posz");
+
+                d.x = elem->FloatAttribute("dirx");
+                d.y = elem->FloatAttribute("diry");
+                d.z = elem->FloatAttribute("dirz");
+
+                r.x = elem->FloatAttribute("radx");
+                r.y = elem->FloatAttribute("rady");
+                r.z = elem->FloatAttribute("radz");
+
+                m_scene->AttachLight(new_light);
+                elem = elem->NextSiblingElement("light");
+            }
         }
     }
 

@@ -1,0 +1,3 @@
+<light_list>
+    <light type="ibl" tex="../Resources/Textures/HDR_112_River_Road_2_Ref.hdr" mul="1" posx="0" posy="0" posz="0" dirx="0" diry="-1" dirz="0" radx="1" rady="1" radz="1"/>
+</light_list>
