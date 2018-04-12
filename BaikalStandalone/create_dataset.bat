@@ -14,12 +14,12 @@ SET MAX=%6
 if "%MIN%"=="" SET MIN="1"
 if "%MAX%"=="" SET MAX="-1"
 
-IF "%SCENE%"=="cornellbox"      CALL :render_aovs ../Resources/CornellBox    orig.objm          %DATA_FOLDER%/CornellBox/cam.log        %DATA_FOLDER%/CornellBox/%LIGHT%.ls     %OUTPUT_FOLDER%/CornellBox 4096
-IF "%SCENE%"=="sponza"          CALL :render_aovs ../Resources/sponza        sponza.obj         %DATA_FOLDER%/sponza/cam.log            %DATA_FOLDER%/sponza/%LIGHT%.ls         %OUTPUT_FOLDER%/Sponza 4096
-IF "%SCENE%"=="salle_de_bain"   CALL :render_aovs ../Resources/salle_de_bain salle_de_bain.obj  %DATA_FOLDER%/salle_de_bain/cam.log     %DATA_FOLDER%/salle_de_bain/%LIGHT%.ls  %OUTPUT_FOLDER%/salle_de_bain 16000
-IF "%SCENE%"=="san-miguel"      CALL :render_aovs ../Resources/san-miguel    san-miguel.obj     %DATA_FOLDER%/san-miguel/cam.log        %DATA_FOLDER%/san-miguel/%LIGHT%.ls     %OUTPUT_FOLDER%/san-miguel 4096 
-IF "%SCENE%"=="cloister"        CALL :render_aovs ../Resources/cloister      cloister.obj       %DATA_FOLDER%/cloister/cam.log          %DATA_FOLDER%/cloister/%LIGHT%.ls       %OUTPUT_FOLDER%/cloister 4096
-IF "%SCENE%"=="kitchen"         CALL :render_aovs ../Resources/kitchen       kitchen_mats2.obj  %DATA_FOLDER%/kitchen/cam.log           %DATA_FOLDER%/kitchen/%LIGHT%.ls        %OUTPUT_FOLDER%/kitchen 100
+IF "%SCENE%"=="cornellbox"      CALL :render_aovs ../Resources/CornellBox    orig.objm          %DATA_FOLDER%/CornellBox/cam.xml        %DATA_FOLDER%/CornellBox/%LIGHT%.ls     %OUTPUT_FOLDER%/CornellBox 4096
+IF "%SCENE%"=="sponza"          CALL :render_aovs ../Resources/sponza        sponza.obj         %DATA_FOLDER%/sponza/cam.xml            %DATA_FOLDER%/sponza/%LIGHT%.ls         %OUTPUT_FOLDER%/Sponza 4096
+IF "%SCENE%"=="salle_de_bain"   CALL :render_aovs ../Resources/salle_de_bain salle_de_bain.obj  %DATA_FOLDER%/salle_de_bain/cam.xml     %DATA_FOLDER%/salle_de_bain/%LIGHT%.ls  %OUTPUT_FOLDER%/salle_de_bain 16000
+IF "%SCENE%"=="san-miguel"      CALL :render_aovs ../Resources/san-miguel    san-miguel.obj     %DATA_FOLDER%/san-miguel/cam.xml        %DATA_FOLDER%/san-miguel/%LIGHT%.ls     %OUTPUT_FOLDER%/san-miguel 4096 
+IF "%SCENE%"=="cloister"        CALL :render_aovs ../Resources/cloister      cloister.obj       %DATA_FOLDER%/cloister/cam.xml          %DATA_FOLDER%/cloister/%LIGHT%.ls       %OUTPUT_FOLDER%/cloister 4096
+IF "%SCENE%"=="kitchen"         CALL :render_aovs ../Resources/kitchen       kitchen_mats2.obj  %DATA_FOLDER%/kitchen/cam.xml           %DATA_FOLDER%/kitchen/%LIGHT%.ls        %OUTPUT_FOLDER%/kitchen 100
 
 EXIT /B %ERRORLEVEL% 
 

@@ -759,12 +759,12 @@ namespace Baikal
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
 
-        TranslateTXTtoXML("../Resources/data/cloister/cam.log", "../Resources/data/cloister/cam.xml", m_settings);
-        TranslateTXTtoXML("../Resources/data/CornellBox/cam.log", "../Resources/data/CornellBox/cam.xml", m_settings);
-        TranslateTXTtoXML("../Resources/data/kitchen/cam.log", "../Resources/data/kitchen/cam.xml", m_settings);
-        TranslateTXTtoXML("../Resources/data/salle_de_bain/cam.log", "../Resources/data/salle_de_bain/cam.xml", m_settings);
-        TranslateTXTtoXML("../Resources/data/san-miguel/cam.log", "../Resources/data/san-miguel/cam.xml", m_settings);
-        TranslateTXTtoXML("../Resources/data/sponza/cam.log", "../Resources/data/sponza/cam.xml", m_settings);
+        //TranslateTXTtoXML("../Resources/data/cloister/cam.log", "../Resources/data/cloister/cam.xml", m_settings);
+        //TranslateTXTtoXML("../Resources/data/CornellBox/cam.log", "../Resources/data/CornellBox/cam.xml", m_settings);
+        //TranslateTXTtoXML("../Resources/data/kitchen/cam.log", "../Resources/data/kitchen/cam.xml", m_settings);
+        //TranslateTXTtoXML("../Resources/data/salle_de_bain/cam.log", "../Resources/data/salle_de_bain/cam.xml", m_settings);
+        //TranslateTXTtoXML("../Resources/data/san-miguel/cam.log", "../Resources/data/san-miguel/cam.xml", m_settings);
+        //TranslateTXTtoXML("../Resources/data/sponza/cam.log", "../Resources/data/sponza/cam.xml", m_settings);
 
 
         m_cam_xml.LoadFile(m_settings.camera_set.c_str());
