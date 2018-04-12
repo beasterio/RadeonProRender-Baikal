@@ -75,6 +75,105 @@ THE SOFTWARE.
 
 using namespace RadeonRays;
 
+namespace
+{
+    void AppendCamera(Baikal::PerspectiveCamera const* cam, const char* xml)
+    {
+        //camera values
+        RadeonRays::float3 cam_pos = cam->GetPosition();
+        RadeonRays::float3 cam_at = cam_pos + cam->GetForwardVector();
+        float aperture = cam->GetAperture();
+        float focus_dist = cam->GetFocusDistance();
+        float focal_length = cam->GetFocalLength();
+
+        tinyxml2::XMLDocument doc;
+        tinyxml2::XMLPrinter printer;
+
+        doc.LoadFile(xml);
+        auto root = doc.FirstChildElement("cam_list");
+        if (!root)
+        {
+            root = doc.NewElement("cam_list");
+            doc.InsertFirstChild(root);
+        }
+
+        auto new_cam = doc.NewElement("camera");
+        //position
+        new_cam->SetAttribute("cpx", cam_pos.x);
+        new_cam->SetAttribute("cpy", cam_pos.y);
+        new_cam->SetAttribute("cpz", cam_pos.z);
+
+        //target
+        new_cam->SetAttribute("tpx", cam_at.x);
+        new_cam->SetAttribute("tpy", cam_at.y);
+        new_cam->SetAttribute("tpz", cam_at.z);
+
+        //other values
+        new_cam->SetAttribute("aperture", aperture);
+        new_cam->SetAttribute("focus_dist", focus_dist);
+        new_cam->SetAttribute("focal_length", focal_length);
+
+        root->InsertEndChild(new_cam);
+        doc.SaveFile(xml);
+    }
+
+    void TranslateTXTtoXML(std::string const& txt, std::string const& xml, Baikal::AppSettings const& settings)
+    {
+        std::vector<std::string> arg;
+        std::vector<char*> argv;
+        int line_number = 0;
+        std::ifstream m_camera_log_fs;
+        m_camera_log_fs.open(txt);
+        while (!m_camera_log_fs.eof())
+        {
+            line_number++;
+
+            arg.clear();
+            argv.clear();
+            //read camera line
+            std::string line;
+            std::stringstream ss;
+            std::getline(m_camera_log_fs, line);
+            ss.str(line);
+
+            while (ss.rdbuf()->in_avail())
+            {
+                std::string val;
+                ss >> val;
+                arg.emplace_back(std::move(val));
+            }
+            for (auto & a : arg)
+            {
+                argv.push_back(&a[0]);
+            }
+
+            //parse
+            Baikal::AppCliParser cli;
+            auto cam_settings = cli.Parse(argv.size(), argv.data());
+            auto cam = Baikal::PerspectiveCamera::Create(cam_settings.camera_pos,
+                cam_settings.camera_at,
+                cam_settings.camera_up);
+
+            //change camera
+            cam->LookAt(cam_settings.camera_pos,
+                cam_settings.camera_at,
+                cam_settings.camera_up);
+
+            // Adjust sensor size based on current aspect ratio
+            float aspect = (float)cam_settings.width / cam_settings.height;
+            cam_settings.camera_sensor_size.y = cam_settings.camera_sensor_size.x / aspect;
+
+            cam->SetSensorSize(cam_settings.camera_sensor_size);
+            cam->SetDepthRange(cam_settings.camera_zcap);
+            cam->SetFocalLength(cam_settings.camera_focal_length);
+            cam->SetFocusDistance(cam_settings.camera_focus_distance);
+            cam->SetAperture(cam_settings.camera_aperture);
+
+            AppendCamera(cam.get(), xml.c_str());
+        }
+    }
+}
+
 namespace Baikal
 {
     static bool     g_is_left_pressed = false;
@@ -386,44 +485,9 @@ namespace Baikal
             //log camera props
             if (g_is_c_pressed)
             {
-                PerspectiveCamera* pcam = dynamic_cast<PerspectiveCamera*>(camera.get());
-                //camera values
-                RadeonRays::float3 cam_pos = pcam->GetPosition();
-                RadeonRays::float3 cam_at = cam_pos + pcam->GetForwardVector();
-                float aperture = pcam->GetAperture();
-                float focus_dist = pcam->GetFocusDistance();
-                float focal_length = pcam->GetFocalLength();
-
-                tinyxml2::XMLDocument doc;
-                tinyxml2::XMLPrinter printer;
-
                 std::string xml_file = m_settings.camera_out_folder + +"/" + kCameraLogFile;
-                doc.LoadFile(xml_file.c_str());
-                auto root = doc.FirstChildElement("cam_list");
-                if (!root)
-                {
-                    root = doc.NewElement("cam_list");
-                    doc.InsertFirstChild(root);
-                }
-
-                auto new_cam = doc.NewElement("camera");
-                //position
-                new_cam->SetAttribute("cpx", cam_pos.x);
-                new_cam->SetAttribute("cpy", cam_pos.y);
-                new_cam->SetAttribute("cpz", cam_pos.z);
-
-                //target
-                new_cam->SetAttribute("tpx", cam_at.x);
-                new_cam->SetAttribute("tpy", cam_at.y);
-                new_cam->SetAttribute("tpz", cam_at.z);
-
-                //other values
-                new_cam->SetAttribute("aperture", aperture);
-                new_cam->SetAttribute("focus_dist", focus_dist);
-                new_cam->SetAttribute("focal_length", focal_length);
-
-                root->InsertEndChild(new_cam);
-                doc.SaveFile(xml_file.c_str());
+                PerspectiveCamera* pcam = dynamic_cast<PerspectiveCamera*>(camera.get());
+                AppendCamera(pcam, xml_file.c_str());
 
                 g_is_c_pressed = false;
             }
@@ -694,6 +758,15 @@ namespace Baikal
         // Command line parsing
         AppCliParser cli;
         m_settings = cli.Parse(argc, argv);
+
+        TranslateTXTtoXML("../Resources/data/cloister/cam.log", "../Resources/data/cloister/cam.xml", m_settings);
+        TranslateTXTtoXML("../Resources/data/CornellBox/cam.log", "../Resources/data/CornellBox/cam.xml", m_settings);
+        TranslateTXTtoXML("../Resources/data/kitchen/cam.log", "../Resources/data/kitchen/cam.xml", m_settings);
+        TranslateTXTtoXML("../Resources/data/salle_de_bain/cam.log", "../Resources/data/salle_de_bain/cam.xml", m_settings);
+        TranslateTXTtoXML("../Resources/data/san-miguel/cam.log", "../Resources/data/san-miguel/cam.xml", m_settings);
+        TranslateTXTtoXML("../Resources/data/sponza/cam.log", "../Resources/data/sponza/cam.xml", m_settings);
+
+
         m_cam_xml.LoadFile(m_settings.camera_set.c_str());
         auto root = m_cam_xml.FirstChildElement("cam_list");
         if (root)
