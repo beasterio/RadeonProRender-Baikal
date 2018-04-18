@@ -30,7 +30,7 @@ cam.xml can be generated/updated using standalone app:
 - move camera to desired position
 - press **C** key to add current camera to the file.
 
-Standalone input **-camera_out_folder some_folder** will specify folder with cam.xml. If file already exist new camera position added to the end of list. Default file: __./BaikalStandalone/cam.xml__
+Standalone input **-output_cam some_folder** will specify folder with cam.xml. If file already exist new camera position added to the end of list. Default file: __./BaikalStandalone/cam.xml__
 
 ## light xml
 
@@ -51,3 +51,12 @@ Current light setup can be saved to light.xml by pressing **L** key.
 There is no tool to change light in app runtime, so light set can be changed only from code or manually in xml file.  
 ## samples.xml
 contain samples number for each need to save AOVs. Can be unordered. Created and updated manually.
+
+# new stanadalone inputs
+- -save_aov will enable saving AOVs.
+- -output_aov folder - specify folder where store AOVs.
+- -camera_set file - specify file with cameras(cam.xml). Need -save_aov option
+- -camera_set_min 10 - ignore all cameras till 10. Used to render only some range of camera set.
+- -camera_set_max 10 - ignore all cameras after 10. Used to render only some range of camera set.
+- -aov_samples_set file - set of desired samples.
+- -light_set file - light set.
