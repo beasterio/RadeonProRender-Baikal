@@ -108,8 +108,8 @@ namespace Baikal
         char* out_aov_folder = GetCmdOption(argv, argv + argc, "-output_aov");
         s.aov_out_folder = out_aov_folder ? out_aov_folder : s.aov_out_folder;
 
-        char* aov_samples = GetCmdOption(argv, argv + argc, "-aov_samples");
-        s.aov_samples = aov_samples ? atoi(aov_samples) : s.aov_samples;
+        char* aov_samples_set = GetCmdOption(argv, argv + argc, "-aov_samples_set");
+        s.aov_samples_set = aov_samples_set ? aov_samples_set : s.aov_samples_set;
 
         char* light_set = GetCmdOption(argv, argv + argc, "-light_set");
         s.light_set = light_set ? light_set : s.light_set;
@@ -253,7 +253,8 @@ namespace Baikal
         , camera_set_max(-1)
         , camera_out_folder(".")
         , aov_out_folder(".")
-        , aov_samples(2048)
+        , aov_samples_set("")
+        , aov_samples()
         , save_aov(false)
         , light_set("")
 

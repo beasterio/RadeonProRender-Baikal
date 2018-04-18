@@ -773,8 +773,7 @@ namespace Baikal
                     cam->SetAperture(aperture);
 
                     //prepare samples
-                    std::vector<int> samples_n = { 1,2,4,8, m_settings.aov_samples };
-                    m_aov_samples.insert(samples_n.begin(), samples_n.end());
+                    m_aov_samples.insert(m_settings.aov_samples.begin(), m_settings.aov_samples.end());
                     update = true;
                 }
                 //nothing left to render
@@ -912,12 +911,34 @@ namespace Baikal
         //TranslateLights("../Resources/data/salle_de_bain/");
         //TranslateLights("../Resources/data/san-miguel/");
         //TranslateLights("../Resources/data/sponza/");
-            
+        //load camera set xml    
         m_cam_xml.LoadFile(m_settings.camera_set.c_str());
         auto root = m_cam_xml.FirstChildElement("cam_list");
         if (root)
         {
             m_cam_current_elem = root->FirstChildElement("camera");
+        }
+
+        //load samples set xml
+        if (!m_settings.aov_samples_set.empty())
+        {
+            tinyxml2::XMLDocument samples_doc;
+            samples_doc.LoadFile(m_settings.aov_samples_set.c_str());
+            root = samples_doc.FirstChildElement("aov_samples_list");
+            assert(root);
+            tinyxml2::XMLElement* sample = root->FirstChildElement();
+            while (sample)
+            {
+                int val = sample->IntText();
+                sample = sample->NextSiblingElement();
+
+                if (val <= 0)
+                {
+                    std::cout << "ignore non positive sample value:" << val << std::endl;
+                    continue;
+                }
+                m_settings.aov_samples.push_back(val);
+            }
         }
 
         if (!m_settings.cmd_line_mode)
