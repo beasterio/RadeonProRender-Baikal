@@ -371,7 +371,7 @@ namespace Baikal
     static float2   g_mouse_delta = float2(0, 0);
     const std::string kCameraLogFile("camera.xml");
     //ls - light set
-    const std::string kLightLogFile("light.ls");
+    const std::string kLightLogFile("light.xml");
 
     static bool     g_is_double_click = false;
     static bool     g_is_f10_pressed = false;
@@ -676,8 +676,6 @@ namespace Baikal
             //log scene lights
             if (g_is_l_pressed)
             {
-                std::ofstream fs;
-                fs.open(kLightLogFile, std::ios::trunc);
                 auto scene = m_cl->GetScene();
                 auto it = scene->CreateLightIterator();
                 for (; it->IsValid(); it->Next())
