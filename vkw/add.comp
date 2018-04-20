@@ -1,0 +1,31 @@
+#version 450
+
+layout (binding=0) buffer A_buffer
+{
+    int A[];
+};
+
+layout (binding=1) buffer B_buffer
+{
+    int B[];
+};
+
+layout (binding=2) buffer C_buffer
+{
+    int C[];
+};
+
+
+layout(local_size_x_id = 0) in;
+layout(local_size_y_id = 1) in;
+layout(local_size_z_id = 2) in;
+
+void main()
+{
+    uint globalThreadIdx = gl_GlobalInvocationID.x;
+
+    //if (globalThreadIdx < N)
+    {
+        C[globalThreadIdx] = A[globalThreadIdx] + B[globalThreadIdx];
+    }
+}

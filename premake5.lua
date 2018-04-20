@@ -120,3 +120,7 @@ end
 if fileExists("./RadeonRaysPremakeAdapter/Calc.lua") then
     dofile("./RadeonRaysPremakeAdapter/Calc.lua")
 end
+
+if fileExists("./vkw/vkw.lua") then
+    dofile("./vkw/vkw.lua")
+end
