@@ -289,8 +289,9 @@ namespace vkw
         image_type = size.width > 1 && size.height > 1 ? VK_IMAGE_TYPE_2D : image_type;
         image_type = size.width > 1 && size.height > 1 && size.depth > 1 ? VK_IMAGE_TYPE_3D : image_type;
         
-        VkImageCreateInfo image_create_info;
+        VkImageCreateInfo image_create_info = {};
         image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_create_info.pNext = nullptr;
         image_create_info.imageType = image_type;
         image_create_info.format = format;
         image_create_info.extent.width = size.width;
@@ -301,10 +302,13 @@ namespace vkw
         image_create_info.arrayLayers = 1;
         image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
         image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-        image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         image_create_info.usage = usage;
+        image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         image_create_info.queueFamilyIndexCount = 0;
         image_create_info.pQueueFamilyIndices = nullptr;
+        image_create_info.flags = 0;
+        image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
         
         VkImage image = nullptr;
         auto res = vkCreateImage(device_, &image_create_info, nullptr, &image);

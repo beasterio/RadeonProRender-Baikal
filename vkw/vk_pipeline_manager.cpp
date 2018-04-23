@@ -2,6 +2,59 @@
 
 namespace vkw
 {
+    PipelineManager::PipelineManager(VkDevice device)
+    : device_(device)
+    {
+        default_assembly_state_ = {};
+        default_assembly_state_.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        default_assembly_state_.pNext = nullptr;
+        default_assembly_state_.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        default_assembly_state_.flags = 0;
+        default_assembly_state_.primitiveRestartEnable = false;
+        
+        default_rasterization_state_ = {};
+        default_rasterization_state_.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        default_rasterization_state_.pNext = nullptr;
+        default_rasterization_state_.polygonMode = VK_POLYGON_MODE_FILL;
+        default_rasterization_state_.cullMode = VK_CULL_MODE_BACK_BIT;
+        default_rasterization_state_.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        default_rasterization_state_.flags = 0;
+        default_rasterization_state_.depthClampEnable = VK_FALSE;
+        default_rasterization_state_.lineWidth = 1.0f;
+        
+        default_blend_attachment_state_ = {};
+        default_blend_attachment_state_.colorWriteMask = 0xF;
+        default_blend_attachment_state_.blendEnable = false;
+        
+        default_color_blend_state_ = {};
+        default_color_blend_state_.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        default_color_blend_state_.pNext = nullptr;
+        default_color_blend_state_.attachmentCount = 1;
+        default_color_blend_state_.pAttachments = &default_blend_attachment_state_;
+        
+        default_viewport_state_ = {};
+        default_viewport_state_.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        default_viewport_state_.pNext = nullptr;
+        default_viewport_state_.viewportCount = 1;
+        default_viewport_state_.scissorCount = 1;
+        default_viewport_state_.flags = 0;
+        
+        default_depth_stencil_state_ = {};
+        default_depth_stencil_state_.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        default_depth_stencil_state_.pNext = nullptr;
+        default_depth_stencil_state_.depthTestEnable = VK_TRUE;
+        default_depth_stencil_state_.depthWriteEnable = VK_TRUE;
+        default_depth_stencil_state_.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        default_depth_stencil_state_.front = default_depth_stencil_state_.back;
+        default_depth_stencil_state_.back.compareOp = VK_COMPARE_OP_ALWAYS;
+        
+        default_multisample_state_ = {};
+        default_multisample_state_.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        default_multisample_state_.pNext = nullptr;
+        default_multisample_state_.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        default_multisample_state_.flags = 0;
+    }
+    
     ComputePipeline PipelineManager::CreateComputePipeline(Shader& shader,
                                                            std::size_t group_size_x,
                                                            std::size_t group_size_y,
@@ -78,7 +131,10 @@ namespace vkw
         return pipeline;
     }
     
-    GraphicsPipeline PipelineManager::CreateGraphicsPipeline(Shader& vs_shader, Shader& ps_shader)
+    GraphicsPipeline PipelineManager::CreateGraphicsPipeline(Shader& vs_shader,
+                                                             Shader& ps_shader,
+                                                             VkRenderPass render_pass,
+                                                             GraphicsPipelineState* create_state)
     {
         GraphicsPipeline pipeline;
         
@@ -146,6 +202,62 @@ namespace vkw
         pipeline_create_info.layout = layout;
         pipeline_create_info.pStages = stages;
         pipeline_create_info.stageCount = 2;
+        pipeline_create_info.renderPass = render_pass;
+        pipeline_create_info.subpass = 0;
+        pipeline_create_info.pTessellationState = nullptr;
+        
+        VkVertexInputBindingDescription vertex_input_bindings;
+        vertex_input_bindings.binding = 0;
+        vertex_input_bindings.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        vertex_input_bindings.stride = vs_shader.vertex_stride;
+        
+        VkPipelineVertexInputStateCreateInfo vertex_input_state;
+        vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertex_input_state.pNext = nullptr;
+        vertex_input_state.vertexBindingDescriptionCount = 1;
+        vertex_input_state.pVertexBindingDescriptions = &vertex_input_bindings;
+        vertex_input_state.vertexAttributeDescriptionCount = (std::uint32_t)vs_shader.vertex_attributes.size();
+        vertex_input_state.pVertexAttributeDescriptions = vs_shader.vertex_attributes.data();
+        vertex_input_state.flags = 0;
+        
+        VkDynamicState dynamic_states[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        
+        VkPipelineDynamicStateCreateInfo dynamic_state = {};
+        dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamic_state.pNext = nullptr;
+        dynamic_state.flags = 0;
+        dynamic_state.dynamicStateCount = 2;
+        dynamic_state.pDynamicStates = dynamic_states;
+        
+        pipeline_create_info.pVertexInputState = &vertex_input_state;
+        pipeline_create_info.pInputAssemblyState = &default_assembly_state_;
+        pipeline_create_info.pRasterizationState = &default_rasterization_state_;
+        pipeline_create_info.pColorBlendState = &default_color_blend_state_;
+        pipeline_create_info.pViewportState = &default_viewport_state_;
+        pipeline_create_info.pDepthStencilState = &default_depth_stencil_state_;
+        pipeline_create_info.pMultisampleState = &default_multisample_state_;
+        pipeline_create_info.pDynamicState = &dynamic_state;
+        
+        if (create_state)
+        {
+            if (create_state->assemply_state)
+                pipeline_create_info.pInputAssemblyState = create_state->assemply_state;
+            
+            if (create_state->rasterization_state)
+                pipeline_create_info.pRasterizationState  = create_state->rasterization_state;
+            
+            if (create_state->color_blend_state)
+                pipeline_create_info.pColorBlendState = create_state->color_blend_state;
+            
+            if (create_state->viewport_state)
+                pipeline_create_info.pViewportState = create_state->viewport_state;
+            
+            if (create_state->depth_stencil_state)
+                pipeline_create_info.pDepthStencilState = create_state->depth_stencil_state;
+            
+            if (create_state->multisample_state)
+                pipeline_create_info.pMultisampleState = create_state->multisample_state;
+        }
         
         VkPipeline raw_pipeline = nullptr;
         res = vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1u, &pipeline_create_info, nullptr, &raw_pipeline);

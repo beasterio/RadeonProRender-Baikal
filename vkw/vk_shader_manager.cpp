@@ -318,21 +318,18 @@ namespace vkw
         {
             shader.vertex_attributes.resize(resources.stage_inputs.size());
             
-            uint32_t offset = 0;
+            shader.vertex_stride = 0;
             
             for (auto i = 0; i < resources.stage_inputs.size(); i++)
             {
                 const spirv_cross::SPIRType type = glsl.get_type(resources.stage_inputs[i].type_id);
                 
-                VkVertexInputAttributeDescription vertex_attribute;
-                vertex_attribute.binding = 0;
-                vertex_attribute.offset = offset;
-                vertex_attribute.format = BaseTypeToVkFormat(type);
-                vertex_attribute.location = i;
+                shader.vertex_attributes[i].binding = 0;
+                shader.vertex_attributes[i].offset = shader.vertex_stride;
+                shader.vertex_attributes[i].format = BaseTypeToVkFormat(type);
+                shader.vertex_attributes[i].location = i;
                 
-                offset += type.width;
-                
-                shader.vertex_attributes[i] = vertex_attribute;
+                shader.vertex_stride += type.width;
             }
         }
         
@@ -360,7 +357,7 @@ namespace vkw
     
     void
     ShaderManager::CreateShaderModule(VkShaderStageFlags binding_stage_flags,
-                                        std::string file_name,
+                                        std::string const& file_name,
                                         Shader& shader)
     {
         std::ifstream in(file_name, std::ios::in | std::ios::binary);
@@ -480,7 +477,9 @@ namespace vkw
             return;
         }
         
-        std::vector<VkDescriptorBufferInfo> buffers(bindings.size());
+        std::vector<VkDescriptorBufferInfo> buffers;
+        buffers.reserve(bindings.size());
+
         std::vector<VkWriteDescriptorSet> write_descriptor_sets;
         for (auto& b: bindings)
         {

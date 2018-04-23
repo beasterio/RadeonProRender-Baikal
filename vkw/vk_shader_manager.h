@@ -42,8 +42,10 @@ namespace vkw
         VkScopedObject<VkDescriptorSetLayout> layout;
         VkScopedObject<VkDescriptorSet> descriptor_set;
         
-        std::vector<VkVertexInputAttributeDescription> vertex_attributes;
         std::vector<VkPushConstantRange> push_constant_ranges;
+        
+        uint32_t vertex_stride;
+        std::vector<VkVertexInputAttributeDescription> vertex_attributes;
         
         struct Binding
         {
@@ -82,7 +84,7 @@ namespace vkw
                                 Shader& shader);
         
         void CreateShaderModule(VkShaderStageFlags binding_stage_flags,
-                                std::string file_name,
+                                std::string const& file_name,
                                 Shader& shader);
         
         static std::uint32_t GetNumDescriptorSets(spirv_cross::CompilerGLSL& glsl);

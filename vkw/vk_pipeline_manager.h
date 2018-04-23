@@ -36,6 +36,25 @@ namespace vkw
         VkScopedObject<VkPipelineLayout> layout;
     };
     
+    struct GraphicsPipelineState
+    {
+        GraphicsPipelineState()
+        : assemply_state(nullptr)
+        , rasterization_state(nullptr)
+        , color_blend_state(nullptr)
+        , viewport_state(nullptr)
+        , depth_stencil_state(nullptr)
+        , multisample_state(nullptr)
+        {}
+        
+        VkPipelineInputAssemblyStateCreateInfo* assemply_state;
+        VkPipelineRasterizationStateCreateInfo* rasterization_state;
+        VkPipelineColorBlendStateCreateInfo* color_blend_state;
+        VkPipelineViewportStateCreateInfo* viewport_state;
+        VkPipelineDepthStencilStateCreateInfo* depth_stencil_state;
+        VkPipelineMultisampleStateCreateInfo* multisample_state;
+    };
+    
     struct GraphicsPipeline
     {
         VkScopedObject<VkPipeline> pipeline;
@@ -45,14 +64,12 @@ namespace vkw
     class PipelineManager
     {
     public:
-        PipelineManager(VkDevice device)
-        : device_(device)
-        {
-        }
+        PipelineManager(VkDevice device);
         
-        // TODO: Add raster stages, depth-stencil, blend etc.
         GraphicsPipeline CreateGraphicsPipeline(Shader& vs_shader,
-                                                Shader& ps_shader);
+                                                Shader& ps_shader,
+                                                VkRenderPass render_pass,
+                                                GraphicsPipelineState* create_state = nullptr);
         
         ComputePipeline CreateComputePipeline(Shader& shader,
                                               std::size_t group_size_x,
@@ -60,6 +77,14 @@ namespace vkw
                                               std::size_t group_size_z);
         
     private:
+        VkPipelineInputAssemblyStateCreateInfo  default_assembly_state_;
+        VkPipelineRasterizationStateCreateInfo  default_rasterization_state_;
+        VkPipelineColorBlendStateCreateInfo     default_color_blend_state_;
+        VkPipelineViewportStateCreateInfo       default_viewport_state_;
+        VkPipelineDepthStencilStateCreateInfo   default_depth_stencil_state_;
+        VkPipelineColorBlendAttachmentState     default_blend_attachment_state_;
+        VkPipelineMultisampleStateCreateInfo    default_multisample_state_;
+        
         VkDevice device_;
     };
 }
