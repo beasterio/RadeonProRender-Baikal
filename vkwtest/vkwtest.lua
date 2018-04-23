@@ -1,12 +1,15 @@
-project "vkw"
-    kind "StaticLib"
-    location "../vkw"
+project "vkwtest"
+    kind "ConsoleApp"
+    location "../vkwtest"
     links {}
-    files { "../vkw/**.h", "../vkw/**.cpp"}
+    files { "../vkwtest/**.comp", "../vkwtest/**.h", "../vkwtest/**.cpp"}
 
     includedirs{"../Baikal/Vulkan",
+                "../vkw",
                 "../3rdparty",
                 "."}
+
+    links {"vkw"}
 
     if os.is("windows") then
         includedirs {}

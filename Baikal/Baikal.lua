@@ -16,6 +16,7 @@ project "Baikal"
                 "../3rdparty/glm",
                 "../3rdparty/gli",
                 "../3rdparty/assimp/include",
+                "../vkw",
                 "."}
 
     if os.is("macosx") then

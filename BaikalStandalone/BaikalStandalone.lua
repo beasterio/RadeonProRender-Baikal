@@ -1,7 +1,7 @@
 project "BaikalStandalone"
     kind "ConsoleApp"
     location "../BaikalStandalone"
-    links {"Baikal", "RadeonRays", "Calc", "CLW"}
+    links {"Baikal", "RadeonRays", "Calc", "CLW", "vkw"}
     files { "../BaikalStandalone/**.inl", "../BaikalStandalone/**.h", "../BaikalStandalone/**.cpp", "../BaikalStandalone/**.cl", "../BaikalStandalone/**.fsh", "../BaikalStandalone/**.vsh" }
 
     includedirs{ "../RadeonRays/RadeonRays/include", 
@@ -12,6 +12,7 @@ project "BaikalStandalone"
                 "../3rdparty/glm",
                 "../3rdparty/gli",
                 "../3rdparty/assimp/include",
+                "../vkw",
                 "."}
 
     if os.is("macosx") then

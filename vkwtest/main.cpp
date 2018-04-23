@@ -174,7 +174,7 @@ int main(int argc, const char * argv[])
     CommandBufferBuilder command_buffer_builder(device, queue_family_index);
     ExecutionManager exec_manager(device, queue_family_index);
     
-    auto shader = shader_manager.CreateShader(VK_SHADER_STAGE_COMPUTE_BIT, "../vkw/add.comp.spv");
+    auto shader = shader_manager.CreateShader(VK_SHADER_STAGE_COMPUTE_BIT, "../vkwtest/add.comp.spv");
     auto pipeline = pipeline_manager.CreateComputePipeline(shader, 64u, 1u, 1u);
     
     auto shader_vs = shader_manager.CreateShader(VK_SHADER_STAGE_VERTEX_BIT, "../Baikal/Kernels/VK/shaders/mrt.vert.spv");

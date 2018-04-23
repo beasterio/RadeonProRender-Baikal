@@ -124,3 +124,7 @@ end
 if fileExists("./vkw/vkw.lua") then
     dofile("./vkw/vkw.lua")
 end
+
+if fileExists("./vkwtest/vkwtest.lua") then
+    dofile("./vkwtest/vkwtest.lua")
+end
