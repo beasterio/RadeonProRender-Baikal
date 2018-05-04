@@ -224,6 +224,7 @@ namespace Baikal
         , recording_enabled(false)
         , benchmark(false)
         , gui_visible(true)
+        //, gui_visible(false)
         , time_benchmarked(false)
         , rt_benchmarked(false)
         , time_benchmark(false)

@@ -19,6 +19,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ********************************************************************/
+#include "Application/application.h"
 
 #ifdef __APPLE__
 #include <OpenCL/OpenCL.h>
@@ -39,6 +40,7 @@ THE SOFTWARE.
 
 #include "ImGUI/imgui.h"
 #include "ImGUI/imgui_impl_glfw_gl3.h"
+#include "ImGUI/imgui_impl_glfw_vulkan.h"
 
 #include <memory>
 #include <chrono>
@@ -67,9 +69,19 @@ THE SOFTWARE.
 #include "CLW.h"
 
 #include "math/mathutils.h"
-#include "Application/application.h"
 
 using namespace RadeonRays;
+
+namespace
+{
+    static void check_vk_result(VkResult err)
+    {
+        if (err == 0) return;
+        printf("VkResult %d\n", err);
+        if (err < 0)
+            abort();
+    }
+}
 
 namespace Baikal
 {
@@ -257,6 +269,83 @@ namespace Baikal
         m_cl->Update(m_settings);
     }
 
+    void Application::InitImGui(vks::VulkanDevice* device, VkRenderPass render_pass)
+    {
+        // Create the Render Pass:
+        {
+
+        }
+
+        // Create Descriptor Pool
+        {
+            VkDescriptorPoolSize pool_size[11] =
+            {
+                { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+                { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+                { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+                { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+                { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+                { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+                { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+                { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+                { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+                { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+                { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+            };
+            VkDescriptorPoolCreateInfo pool_info = {};
+            pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+            pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+            pool_info.maxSets = 1000 * 11;
+            pool_info.poolSizeCount = 11;
+            pool_info.pPoolSizes = pool_size;
+            VK_CHECK_RESULT(vkCreateDescriptorPool(device->logicalDevice, &pool_info, nullptr, &m_imgui_pool));
+        }
+
+        ImGui_ImplGlfwVulkan_Init_Data init_data = {};
+        init_data.allocator = nullptr;
+        init_data.gpu = device->physicalDevice;
+        init_data.device = device->logicalDevice;
+        init_data.render_pass = render_pass;
+        init_data.pipeline_cache = VK_NULL_HANDLE;
+        init_data.descriptor_pool = m_imgui_pool;
+        init_data.check_vk_result = check_vk_result;
+        ImGui_ImplGlfwVulkan_Init(m_window, true, &init_data);
+
+        //command buffer
+        {
+            VkCommandBufferAllocateInfo info = {};
+            info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            info.commandPool = device->commandPool;
+            info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            info.commandBufferCount = 1;
+            VK_CHECK_RESULT(vkAllocateCommandBuffers(device->logicalDevice, &info, &m_imgui_cmd));
+        }
+
+        // Upload Fonts
+        {
+            VkQueue queue = VK_NULL_HANDLE;
+            vkGetDeviceQueue(device->logicalDevice, device->queueFamilyIndices.graphics, 0, &queue);
+            VK_CHECK_RESULT(vkResetCommandPool(device->logicalDevice, device->commandPool, 0));
+            VkCommandBufferBeginInfo begin_info = {};
+            begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            VK_CHECK_RESULT(vkBeginCommandBuffer(m_imgui_cmd, &begin_info));
+
+            ImGui_ImplGlfwVulkan_CreateFontsTexture(m_imgui_cmd);
+
+            VkSubmitInfo end_info = {};
+            end_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            end_info.commandBufferCount = 1;
+            end_info.pCommandBuffers = &m_imgui_cmd;
+            VK_CHECK_RESULT(vkEndCommandBuffer(m_imgui_cmd));
+            VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &end_info, VK_NULL_HANDLE));
+
+            VK_CHECK_RESULT(vkDeviceWaitIdle(device->logicalDevice));
+            ImGui_ImplGlfwVulkan_InvalidateFontUploadObjects();
+        }
+    }
+
+
     void Application::SaveToFile(std::chrono::high_resolution_clock::time_point time) const
     {
         using namespace OIIO;
@@ -346,6 +435,12 @@ namespace Baikal
                     std::cout << "GLFW initialization failed\n";
                     exit(-1);
                 }
+
+                if (!glfwVulkanSupported())
+                {
+                    std::cout << "GLFW no vulkan support\n";
+                    exit(-1);
+                }
             }
             // Setup window
             glfwSetErrorCallback(OnError);
@@ -373,13 +468,17 @@ namespace Baikal
             }
     #endif
 
-            ImGui_ImplGlfwGL3_Init(m_window, true);
+            //ImGui_ImplGlfwGL3_Init(m_window, true);
 
             try
             {
-                m_gl.reset(new AppGlRender(m_settings));
                 //m_cl.reset(new AppClRender(m_settings, m_gl->GetTexture()));
-                m_cl.reset(new AppVkRender(m_settings, m_gl->GetTexture()));
+                m_cl.reset(new AppVkRender(m_settings, NULL));
+                m_gl.reset(new AppVkWindowRender(m_settings, m_cl->GetDevice()));
+                m_gl->SetWindow(m_cl->GetInstance(), m_window);
+                m_gl->SetOutput(m_cl->GetOutput());
+
+                InitImGui(m_cl->GetDevice(), m_gl->GetRenderPass());
 
                 //set callbacks
                 using namespace std::placeholders;
@@ -402,6 +501,14 @@ namespace Baikal
         }
     }
 
+    Application::~Application()
+    {
+        auto vksdevice = m_cl->GetDevice();
+        auto device = vksdevice->logicalDevice;
+        vkDestroyDescriptorPool(device, m_imgui_pool, nullptr);
+        vkFreeCommandBuffers(device, vksdevice->commandPool, 1, &m_imgui_cmd);
+    }
+
     void Application::Run()
     {
         CollectSceneStats();
@@ -415,12 +522,15 @@ namespace Baikal
                 while (!glfwWindowShouldClose(m_window))
                 {
 
-                    ImGui_ImplGlfwGL3_NewFrame();
+                    //ImGui_ImplGlfwGL3_NewFrame();
+                    ImGui_ImplGlfwVulkan_NewFrame();
                     Update(update);
-                    m_gl->Render(m_window);
+                    VkCommandBuffer cmd = m_gl->BeginFrame(m_window);
                     update = UpdateGui();
 
-                    glfwSwapBuffers(m_window);
+                    ImGui_ImplGlfwVulkan_Render(cmd);
+                    m_gl->PresentFrame();
+                    //glfwSwapBuffers(m_window);
                     glfwPollEvents();
                 }
 
@@ -657,7 +767,7 @@ namespace Baikal
             }
 #endif
             ImGui::End();
-            ImGui::Render();
+            //ImGui::Render();
         }
 
         return update;

@@ -25,6 +25,7 @@
 #include "Application/app_utils.h"
 #include "Application/cl_render.h"
 #include "Application/vk_render.h"
+#include "Application/vk_window_render.h"
 #include "Application/gl_render.h"
 
 #include <memory>
@@ -37,10 +38,11 @@ namespace Baikal
     {
     public:
         Application(int argc, char * argv[]);
+        ~Application();
         void Run();
     private:
         void Update(bool update_required);
-        
+        void InitImGui(vks::VulkanDevice* device, VkRenderPass render_pass);
         //update app state according to gui
         // return: true if scene update required
         bool UpdateGui();
@@ -56,13 +58,19 @@ namespace Baikal
 
         AppSettings m_settings;
         //std::unique_ptr<AppClRender> m_cl;
+        //std::unique_ptr<AppGlRender> m_gl;
+
         std::unique_ptr<AppVkRender> m_cl;
-        std::unique_ptr<AppGlRender> m_gl;
+        std::unique_ptr<AppVkWindowRender> m_gl;
 
         GLFWwindow* m_window;
 
         //scene stats stuff
         int m_num_triangles;
         int m_num_instances;
+
+        //vulkan imgui
+        VkDescriptorPool m_imgui_pool;
+        VkCommandBuffer m_imgui_cmd;
     };
 }

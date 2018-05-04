@@ -13,6 +13,7 @@ namespace Baikal
         ~VkOutput();
 
         void GetData(RadeonRays::float3* data) const override;
+        VkImage GetImage() { return m_out.image; };
         struct
         {
             // Framebuffer resources for the deferred pass

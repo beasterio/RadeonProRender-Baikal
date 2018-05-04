@@ -54,29 +54,29 @@ namespace Baikal
     //copy data from Vk to GL
     void AppVkRender::Update(AppSettings& settings)
     {
-        //TODO: add interop
-        int width = m_output.output->width();
-        int height = m_output.output->height();
-#ifdef ENABLE_DENOISER
-        m_outputs[m_primary].output_denoised->GetData(&m_outputs[m_primary].fdata[0]);
-#else
-        m_output.output->GetData(&m_output.fdata[0]);
-#endif
-
-        //float gamma = 2.2f;
-        float gamma = 1.f;
-        for (int i = 0; i < (int)m_output.fdata.size(); ++i)
-        {
-            m_output.udata[4 * i] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].x / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
-            m_output.udata[4 * i + 1] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].y / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
-            m_output.udata[4 * i + 2] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].z / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
-            m_output.udata[4 * i + 3] = 1;
-        }
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, m_tex);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_output.output->width(), m_output.output->height(), GL_RGBA, GL_UNSIGNED_BYTE, &m_output.udata[0]);
-        glBindTexture(GL_TEXTURE_2D, 0);
+//        //TODO: add interop
+//        int width = m_output.output->width();
+//        int height = m_output.output->height();
+//#ifdef ENABLE_DENOISER
+//        m_outputs[m_primary].output_denoised->GetData(&m_outputs[m_primary].fdata[0]);
+//#else
+//        m_output.output->GetData(&m_output.fdata[0]);
+//#endif
+//
+//        //float gamma = 2.2f;
+//        float gamma = 1.f;
+//        for (int i = 0; i < (int)m_output.fdata.size(); ++i)
+//        {
+//            m_output.udata[4 * i] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].x / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+//            m_output.udata[4 * i + 1] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].y / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+//            m_output.udata[4 * i + 2] = (unsigned char)clamp(clamp(pow(m_output.fdata[i].z / m_output.fdata[i].w, 1.f / gamma), 0.f, 1.f) * 255, 0, 255);
+//            m_output.udata[4 * i + 3] = 1;
+//        }
+//
+//        glActiveTexture(GL_TEXTURE0);
+//        glBindTexture(GL_TEXTURE_2D, m_tex);
+//        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_output.output->width(), m_output.output->height(), GL_RGBA, GL_UNSIGNED_BYTE, &m_output.udata[0]);
+//        glBindTexture(GL_TEXTURE_2D, 0);
     }
 
     //compile scene
@@ -137,6 +137,12 @@ namespace Baikal
         }
         m_output_type = type;
     }
+
+    VkOutput* AppVkRender::GetOutput()
+    {
+        return dynamic_cast<VkOutput*>(m_output.output.get());
+    }
+
 
     void AppVkRender::SaveFrameBuffer(AppSettings& settings)
     {

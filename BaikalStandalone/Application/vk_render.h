@@ -25,6 +25,7 @@
 #include <memory>
 #include <vector>
 #include "Output/output.h"
+#include "Output/vkoutput.h"
 #include "SceneGraph/vkscene.h"
 #include "math/float3.h"
 #include "app_utils.h"
@@ -34,7 +35,7 @@ namespace Baikal
 {
     class AppVkRender
     {
-        struct OutputData
+        struct OutputData 
         {
             std::unique_ptr<Baikal::Output> output;
             std::vector<RadeonRays::float3> fdata;
@@ -75,6 +76,10 @@ namespace Baikal
 
         void SetNumBounces(int num_bounces);
         void SetOutputType(OutputType type);
+
+        vks::VulkanDevice* GetDevice() { return m_cfgs[m_primary].vulkan_device; }
+        VkInstance GetInstance() { return m_cfgs[m_primary].instance; }
+        VkOutput* GetOutput();
 #ifdef ENABLE_DENOISER        
         // Denoiser
         void SetDenoiserFloatParam(const std::string& name, const float4& value);

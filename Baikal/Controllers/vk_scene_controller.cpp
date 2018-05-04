@@ -213,6 +213,8 @@ namespace Baikal
         out.camera.matrices.view = glm::lookAt(glm::vec3{ pos.x, pos.y, pos.z },
                                                 glm::vec3{ at.x, at.y, at.z },
                                                 glm::vec3{ up.x, up.y, up.z });
+
+        out.dirty_flags |= VkScene::DirtyFlags::CAMERA;
     }
 
     // Update shape data only.
@@ -416,7 +418,20 @@ namespace Baikal
     // Update lights data only.
     void VkSceneController::UpdateLights(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
-        out.dirty_flags |= VkScene::DirtyFlags::LIGHTS;
+        for (auto it = scene.CreateLightIterator(); it->IsValid(); it->Next())
+        {
+            Baikal::Light::Ptr baikal_light = it->ItemAs<Baikal::Light>();
+            if (baikal_light->IsDirty())
+            {
+                out.dirty_flags |= VkScene::DirtyFlags::LIGHTS;
+            }
+        }
+
+        //update only if lights changed
+        if (!(out.dirty_flags & VkScene::DirtyFlags::LIGHTS))
+        {
+            return;
+        }
 
         out.lights.clear();
 
@@ -561,6 +576,21 @@ namespace Baikal
     // Update material data.
     void VkSceneController::UpdateMaterials(Scene1 const& scene, Collector& mat_collector, Collector& tex_collector, VkScene& out) const
     {
+        for (auto it = mat_collector.CreateIterator(); it->IsValid(); it->Next())
+        {
+            Baikal::Material::Ptr mat = it->ItemAs<Baikal::Material>();
+            if (mat->IsDirty())
+            {
+                out.dirty_flags |= VkScene::DirtyFlags::MATERIALS;
+            }
+        }
+
+        //update only if lights changed
+        if (!(out.dirty_flags & VkScene::DirtyFlags::MATERIALS))
+        {
+            return;
+        }
+
         out.dirty_flags |= VkScene::DirtyFlags::MATERIALS;
 
         auto& device = m_vulkan_device->logicalDevice;
