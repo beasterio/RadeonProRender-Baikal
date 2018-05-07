@@ -23,7 +23,6 @@ THE SOFTWARE.
 #include "VulkanDevice.hpp"
 #include "VulkanTools.h"
 #include "Output/vkoutput.h"
-#include "VulkanSwapChain.hpp"
 
 namespace
 {

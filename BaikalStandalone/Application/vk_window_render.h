@@ -22,9 +22,6 @@
  ********************************************************************/
 #pragma once
 
-#define NOMINMAX
-#include <Windows.h>
-
 #include <vulkan/vulkan.h>
 #include "GLFW/glfw3.h"
 #include "Application/app_utils.h"

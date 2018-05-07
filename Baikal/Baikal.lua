@@ -106,7 +106,9 @@ project "Baikal"
         buildoptions "-std=c++14"
         includedirs { "../3rdparty/glfw/include"}
         links {"OpenImageIO", "pthread"}
-        links{"GLEW", "GL", "glfw"}
+        links{"GLEW", "GL", "glfw", "vulkan"}
+        libdirs{os.getenv("VULKAN_SDK").."/lib",}
+        
         os.execute("rm -rf obj");
     end
 
