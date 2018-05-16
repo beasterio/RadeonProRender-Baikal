@@ -336,6 +336,10 @@ namespace Baikal
                 r.y = elem->FloatAttribute("rady");
                 r.z = elem->FloatAttribute("radz");
 
+                new_light->SetPosition(p);
+                new_light->SetDirection(d);
+                new_light->SetEmittedRadiance(r);
+
                 m_scene->AttachLight(new_light);
                 elem = elem->NextSiblingElement("light");
             }
