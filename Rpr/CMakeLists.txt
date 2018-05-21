@@ -51,10 +51,14 @@ source_group("Utils" FILES ${UTILS_SOURCES})
 
 list(APPEND SOURCES ${WRAP_OBJECT_SOURCES} ${UTILS_SOURCES})
 
+if (WIN32)
+    list(APPEND SOURCES RadeonProRender.def)
+endif (WIN32)
+
 add_library(RadeonProRender SHARED ${SOURCES})
 target_compile_definitions(RadeonProRender PRIVATE RPR_EXPORT_API)
 target_compile_features(RadeonProRender PRIVATE cxx_std_14)
-target_include_directories(RadeonProRender PUBLIC ${Baikal_SOURCE_DIR}/Rpr)
+target_include_directories(RadeonProRender PUBLIC ${Baikal_SOURCE_DIR}/Rpr ${RprSupport_HEADER})
 target_link_libraries(RadeonProRender PUBLIC Baikal BaikalIO OpenGL::GL GLEW::GLEW)
 
     
