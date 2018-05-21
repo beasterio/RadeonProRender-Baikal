@@ -72,6 +72,7 @@ namespace
         { "uberv2.reflection.anisotropy_rotation", "uberv2.reflection.anisotropy_rotation" },
         { "uberv2.reflection.ior", "uberv2.reflection.ior" },
         { "uberv2.reflection.metalness", "uberv2.reflection.metalness" },
+        { "uberv2.reflection.weight", "uberv2.reflection.weight" },
         { "uberv2.refraction.color", "uberv2.refraction.color" },
         { "uberv2.refraction.roughness", "uberv2.refraction.roughness" },
         { "uberv2.refraction.ior", "uberv2.refraction.ior" },
@@ -81,6 +82,7 @@ namespace
         { "uberv2.coating.metalness", "uberv2.coating.metalness" },
         { "uberv2.emission.color", "uberv2.emission.color" },
         { "uberv2.emission.mode", "uberv2.emission.mode" },
+        { "uberv2.emission.weight", "uberv2.emission.weight" },
         { "uberv2.transparency", "uberv2.transparency" },
         { "uberv2.normal", "uberv2.normal" },
         { "uberv2.bump", "uberv2.bump" },
@@ -239,7 +241,7 @@ MaterialObject* MaterialObject::CreateMaterial(rpr_material_node_type in_type)
 }
 
 
-MaterialObject::MaterialObject(Type type)
+MaterialObject::MaterialObject(MaterialObject::Type type)
     : m_type(type)
 {
 }

@@ -37,6 +37,11 @@ fr_int frContextSetAOV(fr_context context, fr_aov aov, fr_framebuffer frame_buff
     return rprContextSetAOV(context, aov, frame_buffer);
 }
 
+fr_int frContextSetAOVindexLookup(fr_context context, fr_int key, fr_float colorR, fr_float colorG, fr_float colorB, fr_float colorA)
+{
+    return rprContextSetAOVindexLookup(context, key, colorR, colorG, colorB, colorA);
+}
+
 fr_int frContextSetScene(fr_context context, fr_scene scene)
 {
     return rprContextSetScene(context, scene);
@@ -147,14 +152,19 @@ fr_int frCameraSetFocalLength(fr_camera camera, fr_float flength)
     return rprCameraSetFocalLength(camera, flength);
 }
 
+fr_int frCameraSetLinearMotion(fr_camera camera, fr_float x, fr_float y, fr_float z)
+{
+    return rprCameraSetLinearMotion(camera, x, y, z);
+}
+
+fr_int frCameraSetAngularMotion(fr_camera camera, fr_float x, fr_float y, fr_float z, fr_float w)
+{
+    return rprCameraSetAngularMotion(camera, x, y, z, w);
+}
+
 fr_int frCameraSetFocusDistance(fr_camera camera, fr_float fdist)
 {
     return rprCameraSetFocusDistance(camera, fdist);
-}
-
-fr_int frImageSetOption(fr_image image, fr_image_option option)
-{
-    return rprImageSetOption(image, option);
 }
 
 fr_int frCameraSetTransform(fr_camera camera, fr_bool transpose, fr_float * transform)
@@ -242,6 +252,21 @@ fr_int frImageSetWrap(fr_image image, fr_image_wrap_type type)
     return rprImageSetWrap(image, type);
 }
 
+fr_int frImageSetFilter(fr_image image, fr_image_filter_type type)
+{
+    return rprImageSetFilter(image, type);
+}
+
+fr_int frImageSetGamma(fr_image image, fr_float type)
+{
+    return rprImageSetGamma(image, type);
+}
+
+fr_int frImageSetMipmapEnabled(fr_image image, fr_bool enabled)
+{
+    return rprImageSetMipmapEnabled(image, enabled);
+}
+
 fr_int frShapeSetTransform(fr_shape shape, fr_bool transpose, fr_float const * transform)
 {
     return rprShapeSetTransform(shape, transpose, transform);
@@ -262,6 +287,11 @@ fr_int frShapeSetSubdivisionBoundaryInterop(fr_shape shape, fr_subdiv_boundary_i
     return rprShapeSetSubdivisionBoundaryInterop(shape, type);
 }
 
+fr_int frShapeAutoAdaptSubdivisionFactor(fr_shape shape, fr_framebuffer framebuffer, fr_camera camera, fr_int factor)
+{
+    return rprShapeAutoAdaptSubdivisionFactor(shape, framebuffer, camera, factor);
+}
+
 fr_int frShapeSetDisplacementScale(fr_shape shape, fr_float minscale, fr_float maxscale)
 {
     return rprShapeSetDisplacementScale(shape, minscale, maxscale);
@@ -270,6 +300,11 @@ fr_int frShapeSetDisplacementScale(fr_shape shape, fr_float minscale, fr_float m
 fr_int frShapeSetObjectGroupID(fr_shape shape, fr_uint objectGroupID)
 {
     return rprShapeSetObjectGroupID(shape, objectGroupID);
+}
+
+fr_int frShapeSetLayerMask(fr_shape shape, fr_uint layerMask)
+{
+    return rprShapeSetLayerMask(shape, layerMask);
 }
 
 fr_int frShapeSetDisplacementMaterial(fr_shape shape, fr_material_node materialNode)
@@ -345,6 +380,16 @@ fr_int frShapeGetInfo(fr_shape arg0, fr_shape_info arg1, size_t arg2, void * arg
 fr_int frMeshGetInfo(fr_shape mesh, fr_mesh_info mesh_info, size_t size, void * data, size_t * size_ret)
 {
     return rprMeshGetInfo(mesh, mesh_info, size, data, size_ret);
+}
+
+fr_int frHeteroVolumeGetInfo(fr_hetero_volume heteroVol, fr_hetero_volume_parameter heteroVol_info, size_t size, void * data, size_t * size_ret)
+{
+    return rprHeteroVolumeGetInfo(heteroVol, heteroVol_info, size, data, size_ret);
+}
+
+fr_int frBufferGetInfo(fr_buffer buffer, fr_buffer_info buffer_info, size_t size, void * data, size_t * size_ret)
+{
+    return rprBufferGetInfo(buffer, buffer_info, size, data, size_ret);
 }
 
 fr_int frMeshPolygonGetInfo(fr_shape mesh, size_t polygon_index, fr_mesh_polygon_info polygon_info, size_t size, void * data, size_t * size_ret)
@@ -440,6 +485,11 @@ fr_int frSkyLightSetAlbedo(fr_light skylight, fr_float albedo)
 fr_int frSkyLightSetScale(fr_light skylight, fr_float scale)
 {
     return rprSkyLightSetScale(skylight, scale);
+}
+
+fr_int frSkyLightSetDirection(fr_light skylight, fr_float x, fr_float y, fr_float z)
+{
+    return rprSkyLightSetDirection(skylight, x, y, z);
 }
 
 fr_int frSkyLightAttachPortal(fr_scene scene, fr_light skylight, fr_shape portal)
@@ -622,27 +672,42 @@ fr_int frContextCreateComposite(fr_context context, fr_composite_type in_type, f
     return rprContextCreateComposite(context, in_type, out_composite);
 }
 
-fr_int frCompositeSetInputFb(fr_composite composite, const char * inputName, fr_framebuffer input)
+fr_int frContextCreateLUTFromFile(fr_context context, const fr_char * fileLutPath, fr_lut * out_lut)
+{
+    return rprContextCreateLUTFromFile(context, fileLutPath, out_lut);
+}
+
+fr_int frContextCreateLUTFromData(fr_context context, const fr_char * lutData, fr_lut * out_lut)
+{
+    return rprContextCreateLUTFromData(context, lutData, out_lut);
+}
+
+fr_int frCompositeSetInputFb(fr_composite composite, const fr_char * inputName, fr_framebuffer input)
 {
     return rprCompositeSetInputFb(composite, inputName, input);
 }
 
-fr_int frCompositeSetInputC(fr_composite composite, const char * inputName, fr_composite input)
+fr_int frCompositeSetInputC(fr_composite composite, const fr_char * inputName, fr_composite input)
 {
     return rprCompositeSetInputC(composite, inputName, input);
 }
 
-fr_int frCompositeSetInput4f(fr_composite composite, const char * inputName, float x, float y, float z, float w)
+fr_int frCompositeSetInputLUT(fr_composite composite, const fr_char * inputName, fr_lut input)
+{
+    return rprCompositeSetInputLUT(composite, inputName, input);
+}
+
+fr_int frCompositeSetInput4f(fr_composite composite, const fr_char * inputName, float x, float y, float z, float w)
 {
     return rprCompositeSetInput4f(composite, inputName, x, y, z, w);
 }
 
-fr_int frCompositeSetInput1u(fr_composite composite, const char * inputName, unsigned int value)
+fr_int frCompositeSetInput1u(fr_composite composite, const fr_char * inputName, unsigned int value)
 {
     return rprCompositeSetInput1u(composite, inputName, value);
 }
 
-fr_int frCompositeSetInputOp(fr_composite composite, const char * inputName, fr_material_node_arithmetic_operation op)
+fr_int frCompositeSetInputOp(fr_composite composite, const fr_char * inputName, fr_material_node_arithmetic_operation op)
 {
     return rprCompositeSetInputOp(composite, inputName, op);
 }
@@ -730,6 +795,21 @@ fr_int frShapeSetHeteroVolume(fr_shape shape, fr_hetero_volume heteroVolume)
 fr_int frHeteroVolumeSetTransform(fr_hetero_volume out_heteroVolume, fr_bool transpose, fr_float const * transform)
 {
     return rprHeteroVolumeSetTransform(out_heteroVolume, transpose, transform);
+}
+
+fr_int frHeteroVolumeSetEmission(fr_hetero_volume heteroVolume, fr_float r, fr_float g, fr_float b)
+{
+    return rprHeteroVolumeSetEmission(heteroVolume, r, g, b);
+}
+
+fr_int frHeteroVolumeSetAlbedo(fr_hetero_volume heteroVolume, fr_float r, fr_float g, fr_float b)
+{
+    return rprHeteroVolumeSetAlbedo(heteroVolume, r, g, b);
+}
+
+fr_int frHeteroVolumeSetFilter(fr_hetero_volume heteroVolume, fr_hetero_volume_filter filter)
+{
+    return rprHeteroVolumeSetFilter(heteroVolume, filter);
 }
 
 fr_int frContextCreateFramebufferFromGLTexture2D(fr_context context, fr_GLenum target, fr_GLint miplevel, fr_GLuint texture, fr_framebuffer * out_fb)

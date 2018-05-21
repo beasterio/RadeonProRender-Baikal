@@ -1,5 +1,5 @@
 #include "UberMaterialObject.h"
-
+#include "RprSupport.h"
 #include "TextureMaterialObject.h"
 #include "ArithmeticMaterialObject.h"
 #include "SceneGraph/uberv2material.h"
@@ -17,6 +17,13 @@ UberMaterialObject::UberMaterialObject() :
 
 void UberMaterialObject::SetInputF(const std::string & input_name, const RadeonRays::float4 & val)
 {
+    //tmp
+    if (input_name == "uberv2.reflection.weight" ||
+        input_name == "uberv2.emission.weight")
+    {
+        return;
+    }
+
     auto inputMap = Baikal::InputMap_ConstantFloat3::Create(val);
     m_mat->SetInputValue(input_name, inputMap);
 }
@@ -31,7 +38,7 @@ void UberMaterialObject::SetInputU(const std::string& input_name, rpr_uint val)
     }
     else if (input_name == "uberv2.refraction.ior_mode")
     {
-        m_mat->LinkRefractionIOR(val == RPR_UBER_MATERIAL_REFRACTION_MODE_LINKED);
+        m_mat->LinkRefractionIOR(val == RPRX_UBER_MATERIAL_REFRACTION_MODE_LINKED);
     }
     else if (input_name == "uberv2.refraction.thin_surface")
     {
@@ -39,7 +46,7 @@ void UberMaterialObject::SetInputU(const std::string& input_name, rpr_uint val)
     }
     else if (input_name == "uberv2.emission.mode")
     {
-        m_mat->SetDoubleSided(val == RPR_UBER_MATERIAL_EMISSION_MODE_DOUBLESIDED);
+        m_mat->SetDoubleSided(val == RPRX_UBER_MATERIAL_EMISSION_MODE_DOUBLESIDED);
     }
     else if (input_name == "uberv2.sss.multiscatter")
     {
@@ -58,6 +65,13 @@ Baikal::Material::Ptr UberMaterialObject::GetMaterial()
 
 void UberMaterialObject::SetInputMaterial(const std::string & input_name, MaterialObject * input)
 {
+        //tmp
+        if (input_name == "uberv2.reflection.weight" ||
+            input_name == "uberv2.emission.weight")
+        {
+            return;
+        }
+
     if (input->IsArithmetic())
     {
         ArithmeticMaterialObject *arithmetic = static_cast<ArithmeticMaterialObject*>(input);
@@ -111,23 +125,23 @@ void UberMaterialObject::GetInput(int i, void* out, size_t* out_size)
 
     switch (i)
     {
-    case RPR_UBER_MATERIAL_LAYERS:
-        *int_out = m_mat->GetLayers();
-        break;
-    case RPR_UBER_MATERIAL_EMISSION_MODE:
+    //case RPRX_UBER_MATERIAL_LAYERS:
+    //    *int_out = m_mat->GetLayers();
+    //    break;
+    case RPRX_UBER_MATERIAL_EMISSION_MODE:
         *int_out = m_mat->isDoubleSided() ?
-            RPR_UBER_MATERIAL_EMISSION_MODE_DOUBLESIDED :
-            RPR_UBER_MATERIAL_EMISSION_MODE_SINGLESIDED;
+            RPRX_UBER_MATERIAL_EMISSION_MODE_DOUBLESIDED :
+            RPRX_UBER_MATERIAL_EMISSION_MODE_SINGLESIDED;
         break;
-    case RPR_UBER_MATERIAL_REFRACTION_IOR_MODE:
+    case RPRX_UBER_MATERIAL_REFRACTION_IOR_MODE:
         *int_out = m_mat->IsLinkRefractionIOR() ?
-            RPR_UBER_MATERIAL_REFRACTION_MODE_LINKED :
-            RPR_UBER_MATERIAL_REFRACTION_MODE_SEPARATE;
+            RPRX_UBER_MATERIAL_REFRACTION_MODE_LINKED :
+            RPRX_UBER_MATERIAL_REFRACTION_MODE_SEPARATE;
         break;
-    case RPR_UBER_MATERIAL_SSS_MULTISCATTER:
+    case RPRX_UBER_MATERIAL_SSS_MULTISCATTER:
         *int_out = m_mat->IsMultiscatter() ? 1 : 0;
         break;
-    case RPR_UBER_MATERIAL_REFRACTION_THIN_SURFACE:
+    case RPRX_UBER_MATERIAL_REFRACTION_THIN_SURFACE:
         *int_out = m_mat->IsThin() ? 1 : 0;
         break;
     default:

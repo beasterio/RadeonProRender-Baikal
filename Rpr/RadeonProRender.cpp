@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ********************************************************************/
 #include "RadeonProRender.h"
+#include "RprSupport.h"
 #include "WrapObject/WrapObject.h"
 #include "WrapObject/ContextObject.h"
 #include "WrapObject/CameraObject.h"
@@ -42,37 +43,41 @@ THE SOFTWARE.
 #define UNSUPPORTED_FUNCTION return RPR_SUCCESS;
 //#define UNSUPPORTED_FUNCTION return RPR_ERROR_UNSUPPORTED;
 
-static const std::map<rpr_material_node_input, std::string> kRPRInputStrings =
+static const std::map<rprx_parameter, std::string> kRPRInputStrings =
 {
-    { RPR_UBER_MATERIAL_DIFFUSE_COLOR, "uberv2.diffuse.color" },
-    { RPR_UBER_MATERIAL_LAYERS, "uberv2.layers" },
-    { RPR_UBER_MATERIAL_REFLECTION_COLOR, "uberv2.reflection.color" },
-    { RPR_UBER_MATERIAL_REFLECTION_ROUGHNESS, "uberv2.reflection.roughness" },
-    { RPR_UBER_MATERIAL_REFLECTION_ANISOTROPY, "uberv2.reflection.anisotropy" },
-    { RPR_UBER_MATERIAL_REFLECTION_ANISOTROPY_ROTATION, "uberv2.reflection.anisotropy_rotation" },
-    { RPR_UBER_MATERIAL_REFLECTION_IOR, "uberv2.reflection.ior" },
-    { RPR_UBER_MATERIAL_REFLECTION_METALNESS, "uberv2.reflection.metalness" },
-    { RPR_UBER_MATERIAL_REFRACTION_COLOR, "uberv2.refraction.color" },
-    { RPR_UBER_MATERIAL_REFRACTION_ROUGHNESS, "uberv2.refraction.roughness" },
-    { RPR_UBER_MATERIAL_REFRACTION_IOR, "uberv2.refraction.ior" },
-    { RPR_UBER_MATERIAL_REFRACTION_IOR_MODE, "uberv2.refraction.ior_mode" },
-    { RPR_UBER_MATERIAL_REFRACTION_THIN_SURFACE, "uberv2.refraction.thin_surface" },
-    { RPR_UBER_MATERIAL_COATING_COLOR, "uberv2.coating.color" },
-    { RPR_UBER_MATERIAL_COATING_IOR, "uberv2.coating.ior" },
-    { RPR_UBER_MATERIAL_EMISSION_COLOR, "uberv2.emission.color" },
-    { RPR_UBER_MATERIAL_EMISSION_WEIGHT, "uberv2.emission.weight" },
-    { RPR_UBER_MATERIAL_EMISSION_MODE, "uberv2.emission.mode" },
-    { RPR_UBER_MATERIAL_TRANSPARENCY, "uberv2.transparency" },
-    { RPR_UBER_MATERIAL_NORMAL, "uberv2.normal" },
-    { RPR_UBER_MATERIAL_BUMP, "uberv2.bump" },
-    { RPR_UBER_MATERIAL_DISPLACEMENT, "uberv2.displacement" },
-    { RPR_UBER_MATERIAL_SSS_ABSORPTION_COLOR, "uberv2.sss.absorption_color" },
-    { RPR_UBER_MATERIAL_SSS_SCATTER_COLOR, "uberv2.sss.scatter_color" },
-    { RPR_UBER_MATERIAL_SSS_ABSORPTION_DISTANCE, "uberv2.sss.absorption_distance" },
-    { RPR_UBER_MATERIAL_SSS_SCATTER_DISTANCE, "uberv2.sss.scatter_distance" },
-    { RPR_UBER_MATERIAL_SSS_SCATTER_DIRECTION, "uberv2.sss.scatter_direction" },
-    { RPR_UBER_MATERIAL_SSS_SUBSURFACE_COLOR, "uberv2.sss.subsurface_color" },
-    { RPR_UBER_MATERIAL_SSS_MULTISCATTER, "uberv2.sss.multiscatter" }
+    { RPRX_UBER_MATERIAL_DIFFUSE_COLOR, "uberv2.diffuse.color" },
+    { RPRX_UBER_MATERIAL_DIFFUSE_WEIGHT, "uberv2.diffuse.weight" },
+    { RPRX_UBER_MATERIAL_REFLECTION_COLOR, "uberv2.reflection.color" },
+    { RPRX_UBER_MATERIAL_REFLECTION_WEIGHT, "uberv2.reflection.weight" },
+    { RPRX_UBER_MATERIAL_REFLECTION_ROUGHNESS, "uberv2.reflection.roughness" },
+    { RPRX_UBER_MATERIAL_REFLECTION_ANISOTROPY, "uberv2.reflection.anisotropy" },
+    { RPRX_UBER_MATERIAL_REFLECTION_ANISOTROPY_ROTATION, "uberv2.reflection.anisotropy_rotation" },
+    { RPRX_UBER_MATERIAL_REFLECTION_IOR, "uberv2.reflection.ior" },
+    //{ RPRX_UBER_MATERIAL_REFLECTION_METALNESS, "uberv2.reflection.metalness" },
+    { RPRX_UBER_MATERIAL_REFRACTION_COLOR, "uberv2.refraction.color" },
+    { RPRX_UBER_MATERIAL_REFRACTION_WEIGHT, "uberv2.refraction.weight" },
+    { RPRX_UBER_MATERIAL_REFRACTION_ROUGHNESS, "uberv2.refraction.roughness" },
+    { RPRX_UBER_MATERIAL_REFRACTION_IOR, "uberv2.refraction.ior" },
+    { RPRX_UBER_MATERIAL_REFRACTION_IOR_MODE, "uberv2.refraction.ior_mode" },
+    { RPRX_UBER_MATERIAL_REFRACTION_THIN_SURFACE, "uberv2.refraction.thin_surface" },
+    { RPRX_UBER_MATERIAL_COATING_COLOR, "uberv2.coating.color" },
+    { RPRX_UBER_MATERIAL_COATING_WEIGHT, "uberv2.coating.weight" },
+    { RPRX_UBER_MATERIAL_COATING_IOR, "uberv2.coating.ior" },
+    { RPRX_UBER_MATERIAL_EMISSION_COLOR, "uberv2.emission.color" },
+    { RPRX_UBER_MATERIAL_EMISSION_WEIGHT, "uberv2.emission.weight" },
+    { RPRX_UBER_MATERIAL_EMISSION_MODE, "uberv2.emission.mode" },
+    { RPRX_UBER_MATERIAL_TRANSPARENCY, "uberv2.transparency" },
+    { RPRX_UBER_MATERIAL_NORMAL, "uberv2.normal" },
+    { RPRX_UBER_MATERIAL_BUMP, "uberv2.bump" },
+    { RPRX_UBER_MATERIAL_DISPLACEMENT, "uberv2.displacement" },
+    { RPRX_UBER_MATERIAL_SSS_ABSORPTION_COLOR, "uberv2.sss.absorption_color" },
+    { RPRX_UBER_MATERIAL_SSS_SCATTER_COLOR, "uberv2.sss.scatter_color" },
+    { RPRX_UBER_MATERIAL_SSS_ABSORPTION_DISTANCE, "uberv2.sss.absorption_distance" },
+    { RPRX_UBER_MATERIAL_SSS_SCATTER_DISTANCE, "uberv2.sss.scatter_distance" },
+    { RPRX_UBER_MATERIAL_SSS_SCATTER_DIRECTION, "uberv2.sss.scatter_direction" },
+    { RPRX_UBER_MATERIAL_SSS_WEIGHT, "uberv2.sss.weight" },
+    { RPRX_UBER_MATERIAL_SSS_SUBSURFACE_COLOR, "uberv2.sss.subsurface_color" },
+    { RPRX_UBER_MATERIAL_SSS_MULTISCATTER, "uberv2.sss.multiscatter" }
 };
 
 
@@ -168,6 +173,12 @@ rpr_int rprContextGetAOV(rpr_context in_context, rpr_aov in_aov, rpr_framebuffer
 
     return result;
 }
+
+rpr_int rprContextSetAOVindexLookup(rpr_context context, rpr_int key, rpr_float colorR, rpr_float colorG, rpr_float colorB, rpr_float colorA)
+{
+    UNSUPPORTED_FUNCTION
+}
+
 
 rpr_int rprContextSetAOV(rpr_context in_context, rpr_aov in_aov, rpr_framebuffer in_frame_buffer)
 {
@@ -772,6 +783,15 @@ rpr_int rprCameraSetFocalLength(rpr_camera in_camera, rpr_float flength)
     return RPR_SUCCESS;
 }
 
+rpr_int rprCameraSetLinearMotion(rpr_camera camera, rpr_float x, rpr_float y, rpr_float z)
+{
+    UNSUPPORTED_FUNCTION
+}
+rpr_int rprCameraSetAngularMotion(rpr_camera camera, rpr_float x, rpr_float y, rpr_float z, rpr_float w)
+{
+    UNSUPPORTED_FUNCTION
+}
+
 rpr_int rprCameraSetFocusDistance(rpr_camera in_camera, rpr_float fdist)
 {
     //cast data
@@ -1016,11 +1036,20 @@ rpr_int rprImageSetWrap(rpr_image image, rpr_image_wrap_type type)
     UNSUPPORTED_FUNCTION
 }
 
-rpr_int rprImageSetOption(rpr_image image, rpr_image_option option)
+rpr_int rprImageSetFilter(rpr_image image, rpr_image_filter_type type)
 {
     UNSUPPORTED_FUNCTION
 }
 
+rpr_int rprImageSetGamma(rpr_image image, rpr_float type)
+{
+    UNSUPPORTED_FUNCTION
+}
+
+rpr_int rprImageSetMipmapEnabled(rpr_image image, rpr_bool enabled)
+{
+    UNSUPPORTED_FUNCTION
+}
 
 rpr_int rprShapeSetTransform(rpr_shape in_shape, rpr_bool transpose, rpr_float const * transform)
 {
@@ -1059,12 +1088,22 @@ rpr_int rprShapeSetSubdivisionBoundaryInterop(rpr_shape shape, rpr_subdiv_bounda
     UNSUPPORTED_FUNCTION
 }
 
+rpr_int rprShapeAutoAdaptSubdivisionFactor(rpr_shape shape, rpr_framebuffer framebuffer, rpr_camera camera, rpr_int factor)
+{
+    UNSUPPORTED_FUNCTION
+}
+
 rpr_int rprShapeSetDisplacementScale(rpr_shape shape, rpr_float minscale, rpr_float maxscale)
 {
     UNSUPPORTED_FUNCTION
 }
 
 rpr_int rprShapeSetObjectGroupID(rpr_shape shape, rpr_uint objectGroupID)
+{
+    UNSUPPORTED_FUNCTION
+}
+
+rpr_int rprShapeSetLayerMask(rpr_shape shape, rpr_uint layerMask)
 {
     UNSUPPORTED_FUNCTION
 }
@@ -1366,6 +1405,16 @@ rpr_int rprMeshGetInfo(rpr_shape in_mesh, rpr_mesh_info in_mesh_info, size_t in_
     return RPR_SUCCESS;
 }
 
+rpr_int rprHeteroVolumeGetInfo(rpr_hetero_volume heteroVol, rpr_hetero_volume_parameter heteroVol_info, size_t size, void * data, size_t * size_ret)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprBufferGetInfo(rpr_buffer buffer, rpr_buffer_info buffer_info, size_t size, void * data, size_t * size_ret)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
 rpr_int rprMeshPolygonGetInfo(rpr_shape mesh, size_t polygon_index, rpr_mesh_polygon_info polygon_info, size_t size, void * data, size_t * size_ret)
 {
     UNIMLEMENTED_FUNCTION
@@ -1613,6 +1662,12 @@ rpr_int rprSkyLightSetScale(rpr_light skylight, rpr_float scale)
 {
     UNIMLEMENTED_FUNCTION
 }
+
+rpr_int rprSkyLightSetDirection(rpr_light skylight, rpr_float x, rpr_float y, rpr_float z)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
 
 rpr_int rprSkyLightAttachPortal(rpr_scene scene, rpr_light skylight, rpr_shape portal)
 {
@@ -2388,27 +2443,43 @@ rpr_int rprContextCreateComposite(rpr_context context, rpr_composite_type in_typ
 {
     UNIMLEMENTED_FUNCTION
 }
-rpr_int rprCompositeSetInputFb(rpr_composite composite, const char * inputName, rpr_framebuffer input)
+
+rpr_int rprContextCreateLUTFromFile(rpr_context context, const rpr_char * fileLutPath, rpr_lut * out_lut)
 {
     UNIMLEMENTED_FUNCTION
 }
 
-rpr_int rprCompositeSetInputC(rpr_composite composite, const char * inputName, rpr_composite input)
+rpr_int rprContextCreateLUTFromData(rpr_context context, const rpr_char * lutData, rpr_lut * out_lut)
 {
     UNIMLEMENTED_FUNCTION
 }
 
-rpr_int rprCompositeSetInput4f(rpr_composite composite, const char * inputName, float x, float y, float z, float w)
+rpr_int rprCompositeSetInputFb(rpr_composite composite, const rpr_char * inputName, rpr_framebuffer input)
 {
     UNIMLEMENTED_FUNCTION
 }
 
-rpr_int rprCompositeSetInput1u(rpr_composite composite, const char * inputName, unsigned int value)
+rpr_int rprCompositeSetInputC(rpr_composite composite, const rpr_char * inputName, rpr_composite input)
 {
     UNIMLEMENTED_FUNCTION
 }
 
-rpr_int rprCompositeSetInputOp(rpr_composite composite, const char * inputName, rpr_material_node_arithmetic_operation op)
+rpr_int rprCompositeSetInputLUT(rpr_composite composite, const rpr_char * inputName, rpr_lut input)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprCompositeSetInput4f(rpr_composite composite, const rpr_char * inputName, float x, float y, float z, float w)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprCompositeSetInput1u(rpr_composite composite, const rpr_char * inputName, unsigned int value)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprCompositeSetInputOp(rpr_composite composite, const rpr_char * inputName, rpr_material_node_arithmetic_operation op)
 {
     UNIMLEMENTED_FUNCTION
 }
@@ -2549,4 +2620,24 @@ rpr_int rprMaterialNodeSetInputBufferData_ext(rpr_material_node in_node, rpr_mat
     return name_it != kRPRInputStrings.end() ?
         rprMaterialNodeSetInputBufferData(in_node, name_it->second.c_str(), buffer)
         : RPR_ERROR_UNSUPPORTED;
+}
+
+rpr_int rprContextCreateHeteroVolume(rpr_context context, rpr_hetero_volume * out_heteroVolume, size_t gridSizeX, size_t gridSizeY, size_t gridSizeZ, void const * indicesList, size_t numberOfIndices, rpr_hetero_volume_indices_topology indicesListTopology, void const * gridData, size_t gridDataSizeByte, rpr_uint gridDataTopology___unused)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprHeteroVolumeSetEmission(rpr_hetero_volume heteroVolume, rpr_float r, rpr_float g, rpr_float b)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprHeteroVolumeSetAlbedo(rpr_hetero_volume heteroVolume, rpr_float r, rpr_float g, rpr_float b)
+{
+    UNIMLEMENTED_FUNCTION
+}
+
+rpr_int rprHeteroVolumeSetFilter(rpr_hetero_volume heteroVolume, rpr_hetero_volume_filter filter)
+{
+    UNIMLEMENTED_FUNCTION
 }

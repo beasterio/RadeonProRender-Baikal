@@ -1,7 +1,5 @@
 EXPORTS
 
-ExportFromRpr
-
 rprRegisterPlugin
 rprCreateContext
 rprContextSetActivePlugin
@@ -9,6 +7,7 @@ rprContextGetInfo
 rprContextGetParameterInfo
 rprContextGetAOV
 rprContextSetAOV
+rprContextSetAOVindexLookup
 rprContextSetScene
 rprContextGetScene
 rprContextSetParameter1u
@@ -31,8 +30,9 @@ rprContextCreateCamera
 rprContextCreateFrameBuffer
 rprCameraGetInfo
 rprCameraSetFocalLength
+rprCameraSetLinearMotion
+rprCameraSetAngularMotion
 rprCameraSetFocusDistance
-rprImageSetOption
 rprCameraSetTransform
 rprCameraSetSensorSize
 rprCameraLookAt
@@ -50,12 +50,17 @@ rprCameraSetNearPlane
 rprCameraSetFarPlane
 rprImageGetInfo
 rprImageSetWrap
+rprImageSetFilter
+rprImageSetGamma
+rprImageSetMipmapEnabled
 rprShapeSetTransform
 rprShapeSetSubdivisionFactor
 rprShapeSetSubdivisionCreaseWeight
 rprShapeSetSubdivisionBoundaryInterop
+rprShapeAutoAdaptSubdivisionFactor
 rprShapeSetDisplacementScale
 rprShapeSetObjectGroupID
+rprShapeSetLayerMask
 rprShapeSetDisplacementMaterial
 rprShapeSetMaterial
 rprShapeSetMaterialFaces
@@ -71,6 +76,8 @@ rprShapeSetShadow
 rprLightSetTransform
 rprShapeGetInfo
 rprMeshGetInfo
+rprHeteroVolumeGetInfo
+rprBufferGetInfo
 rprMeshPolygonGetInfo
 rprInstanceGetBaseShape
 rprContextCreatePointLight
@@ -90,6 +97,7 @@ rprContextCreateSkyLight
 rprSkyLightSetTurbidity
 rprSkyLightSetAlbedo
 rprSkyLightSetScale
+rprSkyLightSetDirection
 rprSkyLightAttachPortal
 rprSkyLightDetachPortal
 rprContextCreateIESLight
@@ -126,8 +134,11 @@ rprMaterialNodeSetInputBufferData
 rprMaterialNodeGetInfo
 rprMaterialNodeGetInputInfo
 rprContextCreateComposite
+rprContextCreateLUTFromFile
+rprContextCreateLUTFromData
 rprCompositeSetInputFb
 rprCompositeSetInputC
+rprCompositeSetInputLUT
 rprCompositeSetInput4f
 rprCompositeSetInput1u
 rprCompositeSetInputOp
@@ -148,6 +159,9 @@ rprPostEffectGetInfo
 rprContextCreateHeteroVolume
 rprShapeSetHeteroVolume
 rprHeteroVolumeSetTransform
+rprHeteroVolumeSetEmission
+rprHeteroVolumeSetAlbedo
+rprHeteroVolumeSetFilter
 rprContextCreateFramebufferFromGLTexture2D
 frRegisterPlugin
 frCreateContext
@@ -156,6 +170,7 @@ frContextGetInfo
 frContextGetParameterInfo
 frContextGetAOV
 frContextSetAOV
+frContextSetAOVindexLookup
 frContextSetScene
 frContextGetScene
 frContextSetParameter1u
@@ -178,8 +193,9 @@ frContextCreateCamera
 frContextCreateFrameBuffer
 frCameraGetInfo
 frCameraSetFocalLength
+frCameraSetLinearMotion
+frCameraSetAngularMotion
 frCameraSetFocusDistance
-frImageSetOption
 frCameraSetTransform
 frCameraSetSensorSize
 frCameraLookAt
@@ -197,12 +213,17 @@ frCameraSetNearPlane
 frCameraSetFarPlane
 frImageGetInfo
 frImageSetWrap
+frImageSetFilter
+frImageSetGamma
+frImageSetMipmapEnabled
 frShapeSetTransform
 frShapeSetSubdivisionFactor
 frShapeSetSubdivisionCreaseWeight
 frShapeSetSubdivisionBoundaryInterop
+frShapeAutoAdaptSubdivisionFactor
 frShapeSetDisplacementScale
 frShapeSetObjectGroupID
+frShapeSetLayerMask
 frShapeSetDisplacementMaterial
 frShapeSetMaterial
 frShapeSetMaterialFaces
@@ -218,6 +239,8 @@ frShapeSetShadow
 frLightSetTransform
 frShapeGetInfo
 frMeshGetInfo
+frHeteroVolumeGetInfo
+frBufferGetInfo
 frMeshPolygonGetInfo
 frInstanceGetBaseShape
 frContextCreatePointLight
@@ -237,6 +260,7 @@ frContextCreateSkyLight
 frSkyLightSetTurbidity
 frSkyLightSetAlbedo
 frSkyLightSetScale
+frSkyLightSetDirection
 frSkyLightAttachPortal
 frSkyLightDetachPortal
 frContextCreateIESLight
@@ -273,8 +297,11 @@ frMaterialNodeSetInputBufferData
 frMaterialNodeGetInfo
 frMaterialNodeGetInputInfo
 frContextCreateComposite
+frContextCreateLUTFromFile
+frContextCreateLUTFromData
 frCompositeSetInputFb
 frCompositeSetInputC
+frCompositeSetInputLUT
 frCompositeSetInput4f
 frCompositeSetInput1u
 frCompositeSetInputOp
@@ -295,10 +322,7 @@ frPostEffectGetInfo
 frContextCreateHeteroVolume
 frShapeSetHeteroVolume
 frHeteroVolumeSetTransform
+frHeteroVolumeSetEmission
+frHeteroVolumeSetAlbedo
+frHeteroVolumeSetFilter
 frContextCreateFramebufferFromGLTexture2D
-
-rprMaterialNodeSetInputN_ext
-rprMaterialNodeSetInputF_ext
-rprMaterialNodeSetInputU_ext
-rprMaterialNodeSetInputImageData_ext
-rprMaterialNodeSetInputBufferData_ext

@@ -34,6 +34,7 @@ THE SOFTWARE.
 
 SceneObject::SceneObject()
     : m_scene(nullptr)
+    , m_current_camera(nullptr)
 {
     m_scene = Baikal::Scene1::Create();
 }

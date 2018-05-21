@@ -110,24 +110,24 @@ rpr_int rprxMaterialSetParameterN(rprx_context context, rprx_material material, 
 
     auto it = kRPRXInputStrings.find(parameter);
 
-    if (parameter == RPRX_UBER_MATERIAL_BUMP ||
-        parameter == RPRX_UBER_MATERIAL_NORMAL)
-    {
-        rpr_uint layers = 0;
-        rpr_uint status;
+    //if (parameter == RPRX_UBER_MATERIAL_BUMP ||
+    //    parameter == RPRX_UBER_MATERIAL_NORMAL)
+    //{
+    //    rpr_uint layers = 0;
+    //    rpr_uint status;
 
-        rprMaterialNodeGetInputInfo((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, RPR_MATERIAL_NODE_INPUT_VALUE, 4, &layers, 0);
+    //    rprMaterialNodeGetInputInfo((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, RPR_MATERIAL_NODE_INPUT_VALUE, 4, &layers, 0);
 
-        if (node)
-        {
-            layers |= RPR_UBER_MATERIAL_LAYER_SHADING_NORMAL;
-        }
-        else
-        {
-            layers &= ~RPR_UBER_MATERIAL_LAYER_SHADING_NORMAL;
-        }
-        rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, layers);
-    }
+    //    if (node)
+    //    {
+    //        layers |= RPRX_UBER_MATERIAL_LAYER_SHADING_NORMAL;
+    //    }
+    //    else
+    //    {
+    //        layers &= ~RPRX_UBER_MATERIAL_LAYER_SHADING_NORMAL;
+    //    }
+    //    rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
+    //}
 
     return (it != kRPRXInputStrings.end()) ?
         rprMaterialNodeSetInputN((rpr_material_node)material, it->second.c_str(), (rpr_material_node)node) :
@@ -151,39 +151,40 @@ rpr_int rprxMaterialSetParameterF(rprx_context context, rprx_material material, 
     if (!material)
         return RPR_ERROR_INVALID_PARAMETER;
 
-    rpr_uint layers = 0;
+    //rpr_uint layers = 0;
     rpr_uint status;
 
-     rprMaterialNodeGetInputInfo((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, RPR_MATERIAL_NODE_INPUT_VALUE, 4, &layers, 0);
+    //rprMaterialNodeGetInputInfo((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, RPR_MATERIAL_NODE_INPUT_VALUE, 4, &layers, 0);
 
-    switch (parameter)
-    {
-        case RPRX_UBER_MATERIAL_DIFFUSE_WEIGHT:
-            if (x > 0.f) layers |= RPR_UBER_MATERIAL_LAYER_DIFFUSE;
-            else layers &= ~RPR_UBER_MATERIAL_LAYER_DIFFUSE;
-            return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, layers);
+    //switch (parameter)
+    //{
+    //    case RPRX_UBER_MATERIAL_DIFFUSE_WEIGHT:
+    //        /*if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_DIFFUSE;
+    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_DIFFUSE;
+    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);*/
+    //        return rprMaterialNodeSetInputU((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
 
-        case RPRX_UBER_MATERIAL_COATING_WEIGHT:
-            if (x > 0.f) layers |= RPR_UBER_MATERIAL_LAYER_COATING;
-            else layers &= ~RPR_UBER_MATERIAL_LAYER_COATING;
-            return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, layers);
+    //    case RPRX_UBER_MATERIAL_COATING_WEIGHT:
+    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_COATING;
+    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_COATING;
+    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
 
-        case RPRX_UBER_MATERIAL_REFLECTION_WEIGHT:
-            if (x > 0.f) layers |= RPR_UBER_MATERIAL_LAYER_REFLECTION;
-            else layers &= ~RPR_UBER_MATERIAL_LAYER_REFLECTION;
-            return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, layers);
+    //    case RPRX_UBER_MATERIAL_REFLECTION_WEIGHT:
+    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_REFLECTION;
+    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_REFLECTION;
+    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
 
-        case RPRX_UBER_MATERIAL_REFRACTION_WEIGHT:
-            if (x > 0.f) layers |= RPR_UBER_MATERIAL_LAYER_REFRACTION;
-            else layers &= ~RPR_UBER_MATERIAL_LAYER_REFRACTION;
-            return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, layers);
+    //    case RPRX_UBER_MATERIAL_REFRACTION_WEIGHT:
+    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_REFRACTION;
+    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_REFRACTION;
+    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
 
-        case RPRX_UBER_MATERIAL_TRANSPARENCY:
-            if (x > 0.f) layers |= RPR_UBER_MATERIAL_LAYER_TRANSPARENCY;
-            else layers &= ~RPR_UBER_MATERIAL_LAYER_TRANSPARENCY;
-            status = rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPR_UBER_MATERIAL_LAYERS, layers);
-            if (status != RPR_SUCCESS) return status;       
-    }
+    //    case RPRX_UBER_MATERIAL_TRANSPARENCY:
+    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_TRANSPARENCY;
+    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_TRANSPARENCY;
+    //        status = rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
+    //        if (status != RPR_SUCCESS) return status;       
+    //}
 
 
     auto it = kRPRXInputStrings.find(parameter);

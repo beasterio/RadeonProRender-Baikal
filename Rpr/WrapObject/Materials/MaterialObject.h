@@ -43,7 +43,7 @@ public:
     enum Type
     {
         //represent rpr_image:
-        kImage, 
+        kImage,
         //textures:
         kNormalMap = RPR_MATERIAL_NODE_NORMAL_MAP,
         kImageTexture = RPR_MATERIAL_NODE_IMAGE_TEXTURE,
@@ -75,15 +75,17 @@ public:
 
     //initialize methods
     static MaterialObject* CreateImage(rpr_image_format const in_format, rpr_image_desc const * in_image_desc, void const * in_data);
-    static MaterialObject* CreateImage(const std::string& in_path);  
+    static MaterialObject* CreateImage(const std::string& in_path);
     static MaterialObject* CreateMaterial(rpr_material_node_type in_type);
 
     virtual ~MaterialObject() = default;
 
-    bool IsImg() { return m_type == Type::kImage;}
-    bool IsMap() { return   m_type == Type::kBumpMap || 
-                            m_type == Type::kNormalMap || 
-                            m_type == Type::kDotTexture; }
+    bool IsImg() { return m_type == Type::kImage; }
+    bool IsMap() {
+        return   m_type == Type::kBumpMap ||
+            m_type == Type::kNormalMap ||
+            m_type == Type::kDotTexture;
+    }
     bool IsArithmetic() const { return m_type == Type::kArithmetic; }
 
     bool IsTexture() { return IsImg() || IsMap(); }
@@ -114,7 +116,7 @@ public:
     virtual char const* GetImageData() const;
     virtual rpr_image_format GetImageFormat() const;
 protected:
-    MaterialObject(Type type);
+    MaterialObject(MaterialObject::Type type);
     //type - is type of input material
     std::string TranslatePropName(const std::string& in, Type type = Type::kDiffuse);
 
