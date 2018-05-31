@@ -1,10 +1,13 @@
 #include <iostream>
 #include <array>
+#include <chrono>
 #include <GL/glew.h>
 #include <RadeonProRender.h>
 #include <RadeonProRender_GL.h>
 #include <RprSupport.h>
 #include <ProRenderGLTF.h>
+#include <map>
+#include <cassert>
 
 #include "GL/glew.h"
 #include "GLFW/glfw3.h"
@@ -23,12 +26,26 @@ rpr_context context = nullptr;
 rpr_material_system materialSystem = nullptr;
 rprx_context uberMatContext = nullptr;
 rpr_framebuffer framebuffer = nullptr;
+rpr_framebuffer framebuffer_empty = nullptr;
 rpr_camera camera = nullptr;
 rpr_light light = nullptr;
 
 GLuint texture = 0;
 GLuint blitProgram = 0;
 GLuint emptyVao = 0;
+
+int aov = 0;
+const std::vector<rpr_int> kAovsList = { RPR_AOV_COLOR,
+                                RPR_AOV_GEOMETRIC_NORMAL,
+                                RPR_AOV_SHADING_NORMAL,
+                                RPR_AOV_UV,
+                                RPR_AOV_WORLD_COORDINATE, };
+
+ std::map<rpr_int, std::string> kAovNamesList = { {RPR_AOV_COLOR,"RPR_AOV_COLOR"},
+{ RPR_AOV_GEOMETRIC_NORMAL, "RPR_AOV_GEOMETRIC_NORMAL" },
+{ RPR_AOV_SHADING_NORMAL, "RPR_AOV_SHADING_NORMAL" },
+{ RPR_AOV_UV, "RPR_AOV_UV"},
+{ RPR_AOV_WORLD_COORDINATE, "RPR_AOV_WORLD_COORDINATE" }, };
 
 float cameraPitch = 0.0f;
 float cameraYaw = 0.0f;
@@ -37,6 +54,14 @@ RadeonRays::float3 cameraTarget;
 RadeonRays::float3 cameraUp;
 RadeonRays::matrix cameraTransform;
 bool clearFramebuffer = false;
+
+static bool g_is_left_pressed = false;
+static bool g_is_right_pressed = false;
+static bool g_is_fwd_pressed = false;
+static bool g_is_back_pressed = false;
+static bool g_is_home_pressed = false;
+static bool g_is_end_pressed = false;
+static bool g_is_q_pressed = false;
 
 #define LOG_FATAL(msg, error) throw std::runtime_error(msg);
 
@@ -79,7 +104,7 @@ static const char* BLIT_FRAGMENT_SHADER = "\
     \n\
     void main()\n\
     {\n\
-        vec4 color = texture(tex, vec2(ps_in.UV.x, 1.0f - ps_in.UV.y));\n\
+        vec4 color = texture(tex, vec2(ps_in.UV.x, ps_in.UV.y));\n\
         color /= color.w;\n\
         FragColor = color;\n\
     }\n\
@@ -158,6 +183,14 @@ void ResizeHandler(GLFWwindow* window, int width, int height)
     if (status != RPR_SUCCESS)
         LOG_FATAL("rprContextCreateFramebufferFromGLTexture2D failed, error ", status);
 
+    rpr_framebuffer_desc desc;
+    desc.fb_width = width;
+    desc.fb_height = height;
+
+    rpr_framebuffer_format fmt = { 4, RPR_COMPONENT_TYPE_FLOAT32 };
+    status = rprContextCreateFrameBuffer(context, fmt, &desc, &framebuffer_empty);
+    assert(status == RPR_SUCCESS);
+
     // Set framebuffer as color aov.
     status = rprContextSetAOV(context, RPR_AOV_COLOR, framebuffer);
     if (status != RPR_SUCCESS)
@@ -166,9 +199,38 @@ void ResizeHandler(GLFWwindow* window, int width, int height)
 
 void Keyhandler(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+    const bool press_or_repeat = action == GLFW_PRESS || action == GLFW_REPEAT;
     if (key == GLFW_KEY_S && action == GLFW_RELEASE)
     {
         rprFrameBufferSaveToFile(framebuffer, "screenshot.png");
+    }
+
+    switch (key)
+    {
+    case GLFW_KEY_UP:
+        g_is_fwd_pressed = press_or_repeat;
+        break;
+    case GLFW_KEY_DOWN:
+        g_is_back_pressed = press_or_repeat;
+        break;
+    case GLFW_KEY_LEFT:
+        g_is_left_pressed = press_or_repeat;
+        break;
+    case GLFW_KEY_RIGHT:
+        g_is_right_pressed = press_or_repeat;
+        break;
+    case GLFW_KEY_HOME:
+        g_is_home_pressed = press_or_repeat;
+        break;
+    case GLFW_KEY_END:
+        g_is_end_pressed = press_or_repeat;
+        break;
+    case GLFW_KEY_Q:
+        if (action == GLFW_RELEASE)
+        {
+            g_is_q_pressed = true;
+        }
+        break;
     }
 }
 
@@ -193,10 +255,74 @@ void UpdateCamera()
 {
     if (camera)
     {
-        RadeonRays::float3  dir = CameraDir();
+        RadeonRays::float3  dir = CameraDir(); dir = RadeonRays::normalize(dir);
         RadeonRays::float3  eye = CameraEye();
         rprCameraLookAt(camera, eye.x, eye.y, eye.z, cameraTarget.x, cameraTarget.y, cameraTarget.z, cameraUp.x, cameraUp.y, cameraUp.z);
         clearFramebuffer = true;
+    }
+}
+
+void Update()
+{
+    static auto prevtime = std::chrono::high_resolution_clock::now();
+    auto time = std::chrono::high_resolution_clock::now();
+    auto dt = std::chrono::duration_cast<std::chrono::duration<double>>(time - prevtime);
+    prevtime = time;
+    bool cam_updated = false;
+
+    RadeonRays::float3 forward = CameraDir();
+    RadeonRays::float3 right = CameraRight();
+    RadeonRays::float3 up(0.f, 1.f, 0.f);
+    float speed = 1.f;
+
+    bool update_cam = false;
+
+    if (g_is_fwd_pressed)
+    {
+        cameraTarget -= (float)dt.count() * speed * forward;
+        update_cam = true;
+    }
+    if (g_is_back_pressed)
+    {
+        cameraTarget += (float)dt.count() * speed * forward;
+        update_cam = true;
+    }
+    if (g_is_left_pressed)
+    {
+        cameraTarget -= (float)dt.count() * speed * right;
+        update_cam = true;
+    }
+    if (g_is_right_pressed)
+    {
+        cameraTarget += (float)dt.count() * speed * right;
+        update_cam = true;
+    }
+    if (g_is_home_pressed)
+    {
+        cameraTarget += (float)dt.count() * speed * up;
+        update_cam = true;
+    }
+    if (g_is_end_pressed)
+    {
+        cameraTarget -= (float)dt.count() * speed * up;
+        update_cam = true;
+    }
+
+    if (g_is_q_pressed)
+    {
+        rpr_int status = rprContextSetAOV(context, kAovsList[aov], nullptr);
+        if (status != RPR_SUCCESS) LOG_FATAL("rprContextSetAOV failed, error ", status);
+        aov = (aov + 1) % kAovsList.size();
+        status = rprContextSetAOV(context, kAovsList[aov], framebuffer);
+        if (status != RPR_SUCCESS) LOG_FATAL("rprContextSetAOV failed, error ", status);
+        std::cout << "aov " << kAovNamesList[kAovsList[aov]] << std::endl;
+        clearFramebuffer = true;
+        g_is_q_pressed = false;
+    }
+
+    if (update_cam)
+    {
+        UpdateCamera();
     }
 }
 
@@ -341,22 +467,22 @@ void InitProRender(const char* filename)
         status = rprEnvironmentLightSetImage(light, image);
         status = rprSceneAttachLight(scene, light);
 
-        // Set the background image to a solid color.
-        std::array<uint8_t, 3> backgroundColor = { 255, 255, 255 };
-        rpr_image_format format = { 3, RPR_COMPONENT_TYPE_UINT8 };
-        rpr_image_desc desc = { 1, 1, 1, 3, 3 };
-        status = rprContextCreateImage(context, format, &desc, backgroundColor.data(), &image);
-        if (status != RPR_SUCCESS)
-            LOG_FATAL("rprContextCreateImage failed error ", status);
+        //// Set the background image to a solid color.
+        //std::array<uint8_t, 3> backgroundColor = { 255, 255, 255 };
+        //rpr_image_format format = { 3, RPR_COMPONENT_TYPE_UINT8 };
+        //rpr_image_desc desc = { 1, 1, 1, 3, 3 };
+        //status = rprContextCreateImage(context, format, &desc, backgroundColor.data(), &image);
+        //if (status != RPR_SUCCESS)
+        //    LOG_FATAL("rprContextCreateImage failed error ", status);
 
-        rpr_light backgroundImageLight;
-        status = rprContextCreateEnvironmentLight(context, &backgroundImageLight);
-        status = rprEnvironmentLightSetImage(backgroundImageLight, image);
-        status = rprSceneSetEnvironmentOverride(scene, RPR_SCENE_ENVIRONMENT_OVERRIDE_BACKGROUND, backgroundImageLight);
+        //rpr_light backgroundImageLight;
+        //status = rprContextCreateEnvironmentLight(context, &backgroundImageLight);
+        //status = rprEnvironmentLightSetImage(backgroundImageLight, image);
+        //status = rprSceneSetEnvironmentOverride(scene, RPR_SCENE_ENVIRONMENT_OVERRIDE_BACKGROUND, backgroundImageLight);
 
     }
 #else
-    {
+    
         // Set the background image to a solid color.
         std::array<uint8_t, 3> backgroundColor = { 255, 255, 255 };
         rpr_image_format format = { 3, RPR_COMPONENT_TYPE_UINT8 };
@@ -401,6 +527,7 @@ int main(int argc, char** argv)
     // Loop until either the ESCAPE key is pressed or the window is closed.
     while (!glfwGetKey(window, GLFW_KEY_ESCAPE) && !glfwWindowShouldClose(window))
     {
+        Update();
         // Render the ProRender scene.
         //rprContextSetParameter1u(context, "rendermode", RPR_RENDER_MODE_TEXCOORD);
         if (clearFramebuffer)
