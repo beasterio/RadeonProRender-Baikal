@@ -108,26 +108,37 @@ rpr_int rprxMaterialSetParameterN(rprx_context context, rprx_material material, 
     if (!material)
         return RPR_ERROR_INVALID_PARAMETER;
 
+    //cast
+    MaterialObject* mat_obj = WrapObject::Cast<MaterialObject>(material);
+    if (!mat_obj)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+    auto mat = dynamic_cast<Baikal::UberV2Material*>(mat_obj->GetMaterial().get());
+
     auto it = kRPRXInputStrings.find(parameter);
 
-    //if (parameter == RPRX_UBER_MATERIAL_BUMP ||
-    //    parameter == RPRX_UBER_MATERIAL_NORMAL)
-    //{
-    //    rpr_uint layers = 0;
-    //    rpr_uint status;
+    if (parameter == RPRX_UBER_MATERIAL_BUMP ||
+        parameter == RPRX_UBER_MATERIAL_NORMAL)
+    {
+        rpr_uint layers = mat->GetLayers();
+        rpr_uint status;
 
-    //    rprMaterialNodeGetInputInfo((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, RPR_MATERIAL_NODE_INPUT_VALUE, 4, &layers, 0);
+        if (node)
+        {
+            layers |= Baikal::UberV2Material::kShadingNormalLayer;
+        }
+        else
+        {
+            layers &= ~Baikal::UberV2Material::kShadingNormalLayer;
+        }
 
-    //    if (node)
-    //    {
-    //        layers |= RPRX_UBER_MATERIAL_LAYER_SHADING_NORMAL;
-    //    }
-    //    else
-    //    {
-    //        layers &= ~RPRX_UBER_MATERIAL_LAYER_SHADING_NORMAL;
-    //    }
-    //    rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
-    //}
+        mat->SetLayers(layers);
+    }
+    else if (parameter == RPRX_UBER_MATERIAL_EMISSION_WEIGHT)
+    {
+        return RPR_SUCCESS;
+    }
 
     return (it != kRPRXInputStrings.end()) ?
         rprMaterialNodeSetInputN((rpr_material_node)material, it->second.c_str(), (rpr_material_node)node) :
@@ -151,44 +162,57 @@ rpr_int rprxMaterialSetParameterF(rprx_context context, rprx_material material, 
     if (!material)
         return RPR_ERROR_INVALID_PARAMETER;
 
-    //rpr_uint layers = 0;
-    rpr_uint status;
+    //cast
+    MaterialObject* mat_obj = WrapObject::Cast<MaterialObject>(material);
+    if (!mat_obj)
+    {
+        return RPR_ERROR_INVALID_PARAMETER;
+    }
+    auto mat = dynamic_cast<Baikal::UberV2Material*>(mat_obj->GetMaterial().get());
 
-    //rprMaterialNodeGetInputInfo((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, RPR_MATERIAL_NODE_INPUT_VALUE, 4, &layers, 0);
+    rpr_uint layers = mat->GetLayers();
+    rpr_uint status = RPR_SUCCESS;
 
-    //switch (parameter)
-    //{
-    //    case RPRX_UBER_MATERIAL_DIFFUSE_WEIGHT:
-    //        /*if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_DIFFUSE;
-    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_DIFFUSE;
-    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);*/
-    //        return rprMaterialNodeSetInputU((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
+    switch (parameter)
+    {
+        case RPRX_UBER_MATERIAL_EMISSION_WEIGHT:
+            if (x > 0.f) layers |= Baikal::UberV2Material::kEmissionLayer;
+            else layers &= ~Baikal::UberV2Material::kEmissionLayer;
+            //mat->SetLayers(layers);
+            return status;
 
-    //    case RPRX_UBER_MATERIAL_COATING_WEIGHT:
-    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_COATING;
-    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_COATING;
-    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
+        case RPRX_UBER_MATERIAL_DIFFUSE_WEIGHT:
+            if (x > 0.f) layers |= Baikal::UberV2Material::kDiffuseLayer;
+            else layers &= ~Baikal::UberV2Material::kDiffuseLayer;
+            mat->SetLayers(layers);
+            return status;
 
-    //    case RPRX_UBER_MATERIAL_REFLECTION_WEIGHT:
-    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_REFLECTION;
-    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_REFLECTION;
-    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
+        case RPRX_UBER_MATERIAL_COATING_WEIGHT:
+            if (x > 0.f) layers |= Baikal::UberV2Material::kCoatingLayer;
+            else layers &= ~Baikal::UberV2Material::kCoatingLayer;
+            mat->SetLayers(layers);
+            return status;
 
-    //    case RPRX_UBER_MATERIAL_REFRACTION_WEIGHT:
-    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_REFRACTION;
-    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_REFRACTION;
-    //        return rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
 
-    //    case RPRX_UBER_MATERIAL_TRANSPARENCY:
-    //        if (x > 0.f) layers |= RPRX_UBER_MATERIAL_LAYER_TRANSPARENCY;
-    //        else layers &= ~RPRX_UBER_MATERIAL_LAYER_TRANSPARENCY;
-    //        status = rprMaterialNodeSetInputU_ext((rpr_material_node)material, RPRX_UBER_MATERIAL_LAYERS, layers);
-    //        if (status != RPR_SUCCESS) return status;       
-    //}
+        case RPRX_UBER_MATERIAL_REFLECTION_WEIGHT:
+            if (x > 0.f) layers |= Baikal::UberV2Material::kReflectionLayer;
+            else layers &= ~Baikal::UberV2Material::kReflectionLayer;
+            mat->SetLayers(layers);
+            return status;
 
+        case RPRX_UBER_MATERIAL_REFRACTION_WEIGHT:
+            if (x > 0.f) layers |= Baikal::UberV2Material::kRefractionLayer;
+            else layers &= ~Baikal::UberV2Material::kRefractionLayer;
+            mat->SetLayers(layers);
+            return status;
+
+        case RPRX_UBER_MATERIAL_TRANSPARENCY:
+            if (x > 0.f) layers |= Baikal::UberV2Material::kTransparencyLayer;
+            else layers &= ~Baikal::UberV2Material::kTransparencyLayer;
+            mat->SetLayers(layers);
+    }
 
     auto it = kRPRXInputStrings.find(parameter);
-
     return (it != kRPRXInputStrings.end()) ?
         rprMaterialNodeSetInputF((rpr_material_node)material, it->second.c_str(), x, y, z, w) :
         RPR_ERROR_INVALID_PARAMETER;
