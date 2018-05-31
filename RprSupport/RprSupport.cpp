@@ -178,6 +178,7 @@ rpr_int rprxMaterialSetParameterF(rprx_context context, rprx_material material, 
         case RPRX_UBER_MATERIAL_EMISSION_WEIGHT:
             if (x > 0.f) layers |= Baikal::UberV2Material::kEmissionLayer;
             else layers &= ~Baikal::UberV2Material::kEmissionLayer;
+            std::cerr << "Warning: kEmissionLayer not supported yet." << std::endl;
             //mat->SetLayers(layers);
             return status;
 
