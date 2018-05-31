@@ -17,13 +17,6 @@ UberMaterialObject::UberMaterialObject() :
 
 void UberMaterialObject::SetInputF(const std::string & input_name, const RadeonRays::float4 & val)
 {
-    //tmp
-    if (input_name == "uberv2.reflection.weight" ||
-        input_name == "uberv2.emission.weight")
-    {
-        return;
-    }
-
     auto inputMap = Baikal::InputMap_ConstantFloat3::Create(val);
     m_mat->SetInputValue(input_name, inputMap);
 }
@@ -65,13 +58,6 @@ Baikal::Material::Ptr UberMaterialObject::GetMaterial()
 
 void UberMaterialObject::SetInputMaterial(const std::string & input_name, MaterialObject * input)
 {
-        //tmp
-        if (input_name == "uberv2.reflection.weight" ||
-            input_name == "uberv2.emission.weight")
-        {
-            return;
-        }
-
     if (input->IsArithmetic())
     {
         ArithmeticMaterialObject *arithmetic = static_cast<ArithmeticMaterialObject*>(input);
@@ -107,7 +93,9 @@ void UberMaterialObject::SetInputTexture(const std::string & input_name, Texture
         }
         else
         {
-            m_mat->SetInputValue(input_name, input->GetTexture());
+            //m_mat->SetInputValue(input_name, input->GetTexture());
+            auto sampler = Baikal::InputMap_Sampler::Create(input->GetTexture());
+            m_mat->SetInputValue(input_name, sampler);
         }
     }
     catch (...)

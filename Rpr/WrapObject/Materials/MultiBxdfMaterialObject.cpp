@@ -23,9 +23,14 @@ THE SOFTWARE.
 #include "TextureMaterialObject.h"
 #include "WrapObject/Exception.h"
 #include "SceneGraph/material.h"
+#include <iostream>
 
 using namespace Baikal;
 using namespace RadeonRays;
+
+const std::map<std::string, std::string> kInputNamesDictionary = {
+    { "color0", "base_material" },
+    { "color1", "top_material" },};
 
 MultiBxdfMaterialObject::MultiBxdfMaterialObject(MaterialObject::Type mat_type, Baikal::MultiBxdf::Type type)
     : MaterialObject(mat_type)
@@ -33,11 +38,17 @@ MultiBxdfMaterialObject::MultiBxdfMaterialObject(MaterialObject::Type mat_type, 
     m_mat = MultiBxdf::Create(type);
     m_mat->SetInputValue("weight", { 0.1f, 0.1f, 0.1f, 0.1f });
     m_mat->SetInputValue("ior", { 1.0f, 1.0f, 1.0f, 1.0f });
+    m_mat->SetInputValue("base_material", SingleBxdf::Create(SingleBxdf::BxdfType::kLambert));
+    m_mat->SetInputValue("top_material", SingleBxdf::Create(SingleBxdf::BxdfType::kLambert));
     m_mat->SetThin(false);
 }
 
 void MultiBxdfMaterialObject::SetInputMaterial(const std::string& input_name, MaterialObject* input)
 {
+    if (!input->GetMaterial())
+    {
+        std::cout << "input empty" << std::endl;
+    }
     //handle blend material case
     if (GetType() == kBlend && input_name == "weight")
     {
@@ -52,7 +63,14 @@ void MultiBxdfMaterialObject::SetInputMaterial(const std::string& input_name, Ma
     }
     else
     {
-        m_mat->SetInputValue(input_name, input->GetMaterial());
+        //translate name
+        std::string translated_name = input_name;
+        auto it = kInputNamesDictionary.find(input_name);
+        if (it != kInputNamesDictionary.end())
+        {
+            translated_name = it->second;
+        }
+        m_mat->SetInputValue(translated_name, input->GetMaterial());
     }
 }
 

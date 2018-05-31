@@ -65,6 +65,7 @@ namespace
         { "op", "op"},
         { "multiscatter", "multiscatter" },
         { "uberv2.diffuse.color", "uberv2.diffuse.color" },
+        { "uberv2.diffuse.weight", "uberv2.diffuse.weight" },
         { "uberv2.layers", "uberv2.layers" },
         { "uberv2.reflection.color", "uberv2.reflection.color" },
         { "uberv2.reflection.roughness", "uberv2.reflection.roughness" },

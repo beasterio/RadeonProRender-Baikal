@@ -51,10 +51,11 @@ void SingleBxdfMaterialObject::SetInputMaterial(const std::string& input_name, M
     {
         throw Exception(RPR_ERROR_INVALID_TAG, "Invalid SingleBxdfMaterialObject input");
     }
+
     //SingleBxdf not supporting materials as input, so using MultiBxdf instead
     float4 w = { 1.f, 1.f, 1.f, 1.f };
     m_mmat->SetInputValue("weight", w);
-    m_mmat->SetInputValue("top_material", input->GetMaterial());
+    m_mmat->SetInputValue("top_material", input->GetMaterial() ? input->GetMaterial():SingleBxdf::Create(SingleBxdf::BxdfType::kLambert));
     is_base = false;
 }
 
