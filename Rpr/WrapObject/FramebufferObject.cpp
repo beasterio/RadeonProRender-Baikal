@@ -37,12 +37,12 @@ FramebufferObject::FramebufferObject(Baikal::Output* out)
 
 }
 
-FramebufferObject::FramebufferObject(CLWContext context, CLWKernel copy_kernel, rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture)
+FramebufferObject::FramebufferObject(CLWContext context, Baikal::MonteCarloRenderer* renderer, rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture)
     : m_output(nullptr)
     , m_width(0)
     , m_height(0)
     , m_context(context)
-    , m_copy_cernel(copy_kernel)
+    , m_mc_renderer(renderer)
 {
     if (target != GL_TEXTURE_2D)
     {
@@ -98,15 +98,16 @@ void FramebufferObject::UpdateGlTex()
         objects.push_back(m_cl_interop_image);
         m_context.AcquireGLObjects(0, objects);
         
+        auto copy_kernel = m_mc_renderer->GetCopyKernel();
         int argc = 0;
-        m_copy_cernel.SetArg(argc++, static_cast<Baikal::ClwOutput*>(GetOutput())->data());
-        m_copy_cernel.SetArg(argc++, Width());
-        m_copy_cernel.SetArg(argc++, Height());
-        m_copy_cernel.SetArg(argc++, 2.2f);
-        m_copy_cernel.SetArg(argc++, m_cl_interop_image);
+        copy_kernel.SetArg(argc++, static_cast<Baikal::ClwOutput*>(GetOutput())->data());
+        copy_kernel.SetArg(argc++, Width());
+        copy_kernel.SetArg(argc++, Height());
+        copy_kernel.SetArg(argc++, 2.2f);
+        copy_kernel.SetArg(argc++, m_cl_interop_image);
 
         int globalsize = Width() * Height();
-        m_context.Launch1D(0, ((globalsize + 63) / 64) * 64, 64, m_copy_cernel);
+        m_context.Launch1D(0, ((globalsize + 63) / 64) * 64, 64, copy_kernel);
 
         m_context.ReleaseGLObjects(0, objects);
         m_context.Finish(0);

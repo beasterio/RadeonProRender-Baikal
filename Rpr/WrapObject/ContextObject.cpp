@@ -169,12 +169,15 @@ void ContextObject::SetAOV(rpr_int in_aov, FramebufferObject* buffer)
     
     for (auto& c : m_cfgs)
     {
-        c.renderer->SetOutput(aov->second, buffer->GetOutput());
+        c.renderer->SetOutput(aov->second, buffer ? buffer->GetOutput() : nullptr);
     }
 
     //update registered output framebuffer
     m_output_framebuffers.erase(old_buf);
-    m_output_framebuffers.insert(buffer);
+    if (buffer)
+    {
+        m_output_framebuffers.insert(buffer);
+    }
 }
 
 
@@ -318,8 +321,9 @@ FramebufferObject* ContextObject::CreateFrameBufferFromGLTexture(rpr_GLenum targ
         throw Exception(RPR_ERROR_INTERNAL_ERROR, "ContextObject: invalid config count.");
     }
     auto& c = m_cfgs[0];
-    auto copykernel = static_cast<Baikal::MonteCarloRenderer*>(c.renderer.get())->GetCopyKernel();
-    FramebufferObject* result = new FramebufferObject(c.context, copykernel, target, miplevel, texture);
+
+    auto renderer = dynamic_cast<Baikal::MonteCarloRenderer*>(c.renderer.get());
+    FramebufferObject* result = new FramebufferObject(c.context, renderer, target, miplevel, texture);
     int w = result->Width();
     int h = result->Height();
     Baikal::Output* out = c.factory->CreateOutput(w, h).release();

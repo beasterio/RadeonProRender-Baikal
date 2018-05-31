@@ -191,7 +191,7 @@ rpr_int rprContextSetAOV(rpr_context in_context, rpr_aov in_aov, rpr_framebuffer
         return RPR_ERROR_INVALID_CONTEXT;
     }
 
-    if (!buffer)
+    if (!buffer && in_frame_buffer)
     {
         return RPR_ERROR_INVALID_PARAMETER;
     }

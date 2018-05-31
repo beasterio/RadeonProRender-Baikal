@@ -26,13 +26,17 @@ THE SOFTWARE.
 #include "Renderers/renderer.h"
 #include "RadeonProRender_GL.h"
 
+namespace Baikal
+{
+    class MonteCarloRenderer;
+}
 //this class represent rpr_context
 class FramebufferObject
     : public WrapObject
 {
 public:
     FramebufferObject(Baikal::Output* out);
-    FramebufferObject(CLWContext context, CLWKernel copy_cernel, rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture);
+    FramebufferObject(CLWContext context, Baikal::MonteCarloRenderer* renderer, rpr_GLenum target, rpr_GLint miplevel, rpr_GLuint texture);
     virtual ~FramebufferObject();
 
     //output
@@ -58,5 +62,5 @@ private:
     int m_height;
     CLWImage2D m_cl_interop_image;
     CLWContext m_context;
-    CLWKernel m_copy_cernel;
+    Baikal::MonteCarloRenderer* m_mc_renderer;
 };
