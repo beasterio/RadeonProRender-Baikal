@@ -48,10 +48,10 @@ void ArithmeticMaterialObject::SetInputMaterial(const std::string& input_name, M
     {
         throw Exception(RPR_ERROR_INTERNAL_ERROR, "Only Arithmetic node can be used as input");
     }
-    if (!m_input_map)
-    {
-        throw Exception(RPR_ERROR_INTERNAL_ERROR, "\"op\" input must be set first");
-    } 
+    //if (!m_input_map)
+    //{
+    //    throw Exception(RPR_ERROR_INTERNAL_ERROR, "\"op\" input must be set first");
+    //} 
     ArithmeticMaterialObject *arithmetic = static_cast<ArithmeticMaterialObject*>(input);
     SetInputMap(input_name, arithmetic->GetInputMap());
 }
@@ -244,11 +244,24 @@ void ArithmeticMaterialObject::SetInputU(const std::string& input_name, rpr_uint
         default:
             throw Exception(RPR_ERROR_INTERNAL_ERROR, "Unsupported operation");
         }
+
+        for (auto& input : m_cache_inputs)
+        {
+            SetInputMap(input.first, input.second);
+        }
+        m_cache_inputs.clear();
     }
 }
 
 void ArithmeticMaterialObject::SetInputMap(const std::string& input_name, Baikal::InputMap::Ptr input_map)
 {
+    //if "op" isn't setup yet
+    if (!m_input_map)
+    {
+        m_cache_inputs[input_name] = input_map;
+        return;
+    }
+
     // get number from string "colorN"
     int position = input_name[5] - '0';
     if (position < 0 || position > 3)

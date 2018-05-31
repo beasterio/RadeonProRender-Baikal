@@ -44,4 +44,8 @@ protected:
 
 private:
     Baikal::InputMap::Ptr m_input_map;
+
+    //material type is defined when processing "op" input
+    //so need to remember all previous inputs
+    std::map<std::string, Baikal::InputMap::Ptr> m_cache_inputs;
 };
